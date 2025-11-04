@@ -319,8 +319,10 @@ def scrape_amazon_product_details(driver, product_url):
 def scrape_flipkart_product_details(driver, product_url):
     """Scrape detailed information from Flipkart product page"""
     try:
-        driver.get(product_url)
-        time.sleep(random.uniform(3, 5))
+        # Only navigate if URL is provided (for backward compatibility)
+        if product_url:
+            driver.get(product_url)
+            time.sleep(random.uniform(3, 5))
         
         details = {
             'technical_details': {},
@@ -406,29 +408,61 @@ def scrape_detailed_amazon(driver, product_name, max_products=5):
         try:
             print(f"  Scraping Amazon product {idx+1}/{max_products}...")
             
-            # Get product link
+            # Get product link with multiple selector attempts
             product_link = ""
-            try:
-                link_element = item.find_element(By.CSS_SELECTOR, "h2 a")
-                product_link = link_element.get_attribute("href")
-                print(f"    Found link: {product_link[:60]}...")
-            except Exception as e:
-                print(f"    Failed to extract link: {e}")
+            link_selectors = [
+                "h2 a",
+                "h2.a-size-mini a",
+                ".a-link-normal.s-no-outline",
+                ".a-link-normal.a-text-normal",
+                "a.a-link-normal[href*='/dp/']",
+                "a[href*='/dp/']"
+            ]
+            
+            for selector in link_selectors:
+                try:
+                    link_element = item.find_element(By.CSS_SELECTOR, selector)
+                    product_link = link_element.get_attribute("href")
+                    if product_link and '/dp/' in product_link:
+                        print(f"    Found link with selector '{selector}': {product_link[:60]}...")
+                        break
+                except NoSuchElementException:
+                    continue
+            
+            if not product_link:
+                print(f"    Failed to extract link: No valid link found with any selector")
                 continue
             
-            # Get product name
+            # Get product name with multiple selector attempts
             name = ""
-            try:
-                name_element = item.find_element(By.CSS_SELECTOR, "h2 span")
-                name = name_element.text.strip()
-                if not name:
-                    # Try alternative selector
-                    name_element = item.find_element(By.CSS_SELECTOR, "h2")
+            name_selectors = [
+                "h2 span",
+                "h2 a span",
+                "h2.a-size-mini span.a-size-medium",
+                "h2.a-size-mini span.a-size-base-plus",
+                "span.a-size-medium.a-color-base.a-text-normal",
+                "span.a-size-base-plus"
+            ]
+            
+            for selector in name_selectors:
+                try:
+                    name_element = item.find_element(By.CSS_SELECTOR, selector)
                     name = name_element.text.strip()
-                print(f"    Found name: {name[:60]}")
-            except Exception as e:
-                print(f"    Failed to extract name: {e}")
-                continue
+                    if name and len(name) > 3:
+                        print(f"    Found name with selector '{selector}': {name[:60]}")
+                        break
+                except NoSuchElementException:
+                    continue
+            
+            if not name:
+                # Final fallback - try to get name from the link element
+                try:
+                    link_element = item.find_element(By.CSS_SELECTOR, f"a[href='{product_link}']")
+                    name = link_element.get_attribute("aria-label") or link_element.text.strip()
+                    print(f"    Found name from link aria-label/text: {name[:60]}")
+                except:
+                    print(f"    Failed to extract name: No valid name found")
+                    continue
             
             if not product_link or not name or len(name) < 3:
                 print(f"    Skipping - invalid link or name")
@@ -556,30 +590,56 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
         try:
             print(f"  Scraping Flipkart product {idx+1}/{max_products}...")
             
-            # Get product link
+            # Get product link with multiple selector attempts
             product_link = ""
-            try:
-                link_element = item.find_element(By.CSS_SELECTOR, "a[href*='/p/']")
-                href = link_element.get_attribute("href")
-                if href:
-                    product_link = href if href.startswith('http') else f"https://www.flipkart.com{href}"
-                print(f"    Found link: {product_link[:60]}...")
-            except Exception as e:
-                print(f"    Failed to extract link: {e}")
+            link_selectors = [
+                "a[href*='/p/']",
+                "a[href*='/product/']",
+                "a.s1Q9rs",
+                "a._1fQZEK",
+                "a._2rpwqI"
+            ]
+            
+            for selector in link_selectors:
+                try:
+                    link_element = item.find_element(By.CSS_SELECTOR, selector)
+                    href = link_element.get_attribute("href")
+                    if href and ('/p/' in href or '/product/' in href) and 'search' not in href:
+                        product_link = href if href.startswith('http') else f"https://www.flipkart.com{href}"
+                        print(f"    Found link with selector '{selector}': {product_link[:60]}...")
+                        break
+                except NoSuchElementException:
+                    continue
+            
+            if not product_link:
+                print(f"    Failed to extract link: No valid product link found")
                 continue
             
-            # Get product name
+            # Get product name with multiple selector attempts
             name = ""
-            try:
-                name_element = item.find_element(By.CSS_SELECTOR, "._4rR01T, .IRpwTa, ._2WkVRV, .KzDlHZ, .s1Q9rs, .wjcEIp")
-                name = name_element.text.strip()
-                print(f"    Found name: {name[:60]}")
-            except Exception as e:
-                print(f"    Failed to extract name: {e}")
-                continue
+            name_selectors = [
+                "._4rR01T",
+                ".IRpwTa",
+                "._2WkVRV",
+                ".KzDlHZ",
+                ".s1Q9rs",
+                ".wjcEIp",
+                "a.s1Q9rs",
+                "div._4rR01T"
+            ]
             
-            if not product_link or not name or "search" in product_link or len(name) < 3:
-                print(f"    Skipping - invalid link or name")
+            for selector in name_selectors:
+                try:
+                    name_element = item.find_element(By.CSS_SELECTOR, selector)
+                    name = name_element.text.strip()
+                    if name and len(name) > 3:
+                        print(f"    Found name with selector '{selector}': {name[:60]}")
+                        break
+                except NoSuchElementException:
+                    continue
+            
+            if not name:
+                print(f"    Failed to extract name: No valid name found")
                 continue
 
             # --- NON-ESSENTIAL INFO ---
@@ -615,20 +675,23 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
             except NoSuchElementException:
                 pass # Optional
             
-            # Now scrape detailed info from product page
-            detailed_info = scrape_flipkart_product_details(driver, product_link)
+            # Open product page in new tab (similar to Amazon approach)
+            print(f"    Opening product page in new tab...")
+            driver.execute_script("window.open(arguments[0]);", product_link)
+            time.sleep(3)
             
-            # Go back to search results
-            driver.back()
-            time.sleep(random.uniform(2, 3))
+            # Switch to new tab
+            driver.switch_to.window(driver.window_handles[1])
+            print(f"    Switched to new tab, extracting details...")
             
-            # Close popup if appears
-            try:
-                close_btn = driver.find_element(By.XPATH, "//button[contains(text(), '✕')]")
-                close_btn.click()
-                time.sleep(1)
-            except:
-                pass
+            # Scrape detailed info from product page
+            detailed_info = scrape_flipkart_product_details(driver, None)
+            
+            # Close tab and switch back
+            driver.close()
+            driver.switch_to.window(driver.window_handles[0])
+            print(f"    Closed tab, back to search results")
+            time.sleep(1)
             
             product_data = {
                 "name": name,
@@ -648,13 +711,18 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
                 product_data.update(detailed_info)
             
             products.append(product_data)
+            print(f"    ✓ Successfully scraped product {idx+1}")
             
         except Exception as e:
-            print(f"  Error on Flipkart product {idx+1}: {e}")
-            # Try to go back
+            print(f"  ✗ Error on Flipkart product {idx+1}: {e}")
+            import traceback
+            traceback.print_exc()
+            # Close any extra tabs and return to main window
             try:
-                driver.back()
-                time.sleep(2)
+                while len(driver.window_handles) > 1:
+                    driver.switch_to.window(driver.window_handles[-1])
+                    driver.close()
+                driver.switch_to.window(driver.window_handles[0])
             except:
                 pass
             continue
