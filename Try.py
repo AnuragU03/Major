@@ -14,8 +14,7 @@ from datetime import datetime
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+
 from collections import defaultdict
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox
@@ -25,320 +24,10 @@ import requests
 from io import BytesIO
 from threading import Thread
 from webdriver_manager.chrome import ChromeDriverManager
-import networkx as nx
-from matplotlib.patches import FancyBboxPatch
 import os
 from typing import Dict, List, Any, Optional
 
-# ===========================
-# Graph Database System
-# ===========================
 
-class ProductGraphDatabase:
-    """Graph database for products with nodes and relationships"""
-    
-    def __init__(self):
-        self.graph = nx.DiGraph()  # Directed graph
-        self.node_types = {
-            'Product': [],
-            'Brand': [],
-            'Category': [],
-            'Source': [],
-            'PriceRange': [],
-            'Rating': []
-        }
-        
-    def add_product_node(self, product):
-        """Add product as a node with all relationships"""
-        product_id = product.get('id', f"prod_{random.randint(1000, 9999)}")
-        
-        # Add product node
-        self.graph.add_node(product_id,
-                           type='Product',
-                           name=product.get('name', 'Unknown'),
-                           price=product.get('price_numeric', 0),
-                           rating=product.get('rating', 'N/A'),
-                           source=product.get('source', 'Unknown'),
-                           link=product.get('product_link', ''),
-                           image=product.get('image_url', ''),
-                           timestamp=product.get('timestamp', datetime.now().isoformat()))
-        
-        self.node_types['Product'].append(product_id)
-        
-        # Extract and add brand node
-        brand = self._extract_brand(product.get('name', ''))
-        if brand:
-            brand_id = f"brand_{brand.lower().replace(' ', '_')}"
-            if not self.graph.has_node(brand_id):
-                self.graph.add_node(brand_id, type='Brand', name=brand)
-                self.node_types['Brand'].append(brand_id)
-            self.graph.add_edge(product_id, brand_id, relationship='HAS_BRAND')
-        
-        # Add category node
-        category = product.get('category', 'Electronics')
-        category_id = f"cat_{category.lower().replace(' ', '_')}"
-        if not self.graph.has_node(category_id):
-            self.graph.add_node(category_id, type='Category', name=category)
-            self.node_types['Category'].append(category_id)
-        self.graph.add_edge(product_id, category_id, relationship='IN_CATEGORY')
-        
-        # Add source node
-        source = product.get('source', 'Unknown')
-        source_id = f"src_{source.lower()}"
-        if not self.graph.has_node(source_id):
-            self.graph.add_node(source_id, type='Source', name=source)
-            self.node_types['Source'].append(source_id)
-        self.graph.add_edge(product_id, source_id, relationship='SOLD_BY')
-        
-        # Add price range node
-        price = product.get('price_numeric', 0)
-        price_range = self._get_price_range(price)
-        price_id = f"price_{price_range.lower().replace(' ', '_')}"
-        if not self.graph.has_node(price_id):
-            self.graph.add_node(price_id, type='PriceRange', name=price_range)
-            self.node_types['PriceRange'].append(price_id)
-        self.graph.add_edge(product_id, price_id, relationship='PRICED_IN')
-        
-        # Add rating node
-        rating_str = str(product.get('rating', ''))
-        rating_match = re.search(r'(\d+\.?\d*)', rating_str)
-        if rating_match:
-            rating_val = float(rating_match.group(1))
-            rating_category = self._get_rating_category(rating_val)
-            rating_id = f"rating_{rating_category.lower().replace(' ', '_')}"
-            if not self.graph.has_node(rating_id):
-                self.graph.add_node(rating_id, type='Rating', name=rating_category)
-                self.node_types['Rating'].append(rating_id)
-            self.graph.add_edge(product_id, rating_id, relationship='HAS_RATING')
-        
-        # Add specification relationships
-        if product.get('technical_details'):
-            for key, value in product.get('technical_details', {}).items():
-                spec_id = f"spec_{key.lower().replace(' ', '_')[:30]}"
-                if not self.graph.has_node(spec_id):
-                    self.graph.add_node(spec_id, type='Specification', name=key, value=str(value))
-                self.graph.add_edge(product_id, spec_id, relationship='HAS_SPEC')
-    
-    def _extract_brand(self, product_name):
-        """Extract brand from product name"""
-        common_brands = ['Apple', 'Samsung', 'OnePlus', 'Xiaomi', 'Redmi', 'Realme', 
-                        'Oppo', 'Vivo', 'Google', 'Pixel', 'iPhone', 'Galaxy', 
-                        'Mi', 'Poco', 'Asus', 'Sony', 'Nokia', 'Motorola', 'LG']
-        
-        for brand in common_brands:
-            if brand.lower() in product_name.lower():
-                return brand
-        
-        # Try to extract first word as brand
-        words = product_name.split()
-        if words:
-            return words[0]
-        return None
-    
-    def _get_price_range(self, price):
-        """Categorize price into ranges"""
-        if price == 0:
-            return "Unknown"
-        elif price < 10000:
-            return "Budget (< ₹10K)"
-        elif price < 25000:
-            return "Mid-Range (₹10K-25K)"
-        elif price < 50000:
-            return "Premium (₹25K-50K)"
-        else:
-            return "Flagship (> ₹50K)"
-    
-    def _get_rating_category(self, rating):
-        """Categorize rating"""
-        if rating >= 4.5:
-            return "Excellent (4.5+)"
-        elif rating >= 4.0:
-            return "Very Good (4.0-4.5)"
-        elif rating >= 3.5:
-            return "Good (3.5-4.0)"
-        elif rating >= 3.0:
-            return "Average (3.0-3.5)"
-        else:
-            return "Below Average (< 3.0)"
-    
-    def get_graph_stats(self):
-        """Get graph statistics"""
-        return {
-            'total_nodes': self.graph.number_of_nodes(),
-            'total_edges': self.graph.number_of_edges(),
-            'products': len(self.node_types['Product']),
-            'brands': len(self.node_types['Brand']),
-            'categories': len(self.node_types['Category']),
-            'sources': len(self.node_types['Source']),
-            'price_ranges': len(self.node_types['PriceRange']),
-            'ratings': len(self.node_types['Rating'])
-        }
-    
-    def export_to_neo4j_format(self, filename='graph_export_neo4j.json'):
-        """Export in Neo4j-compatible format"""
-        nodes = []
-        edges = []
-        
-        for node_id, node_data in self.graph.nodes(data=True):
-            nodes.append({
-                'id': node_id,
-                'labels': [node_data.get('type', 'Unknown')],
-                'properties': {k: v for k, v in node_data.items() if k != 'type'}
-            })
-        
-        for source, target, edge_data in self.graph.edges(data=True):
-            edges.append({
-                'source': source,
-                'target': target,
-                'type': edge_data.get('relationship', 'RELATED_TO'),
-                'properties': {k: v for k, v in edge_data.items() if k != 'relationship'}
-            })
-        
-        export_data = {
-            'nodes': nodes,
-            'edges': edges,
-            'metadata': {
-                'exported_at': datetime.now().isoformat(),
-                'total_nodes': len(nodes),
-                'total_edges': len(edges)
-            }
-        }
-        
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(export_data, f, indent=2, ensure_ascii=False)
-        
-        print(f"\n✓ Graph exported to {filename} (Neo4j format)")
-        print(f"   • {len(nodes)} nodes")
-        print(f"   • {len(edges)} relationships")
-        return filename
-    
-    def export_to_gephi_format(self, nodes_file='graph_nodes.csv', edges_file='graph_edges.csv'):
-        """Export in Gephi-compatible CSV format"""
-        # Export nodes
-        nodes_data = []
-        for node_id, node_data in self.graph.nodes(data=True):
-            nodes_data.append({
-                'Id': node_id,
-                'Label': node_data.get('name', node_id),
-                'Type': node_data.get('type', 'Unknown'),
-                **{k: v for k, v in node_data.items() if k not in ['name', 'type']}
-            })
-        
-        nodes_df = pd.DataFrame(nodes_data)
-        nodes_df.to_csv(nodes_file, index=False, encoding='utf-8-sig')
-        
-        # Export edges
-        edges_data = []
-        for source, target, edge_data in self.graph.edges(data=True):
-            edges_data.append({
-                'Source': source,
-                'Target': target,
-                'Type': edge_data.get('relationship', 'RELATED_TO'),
-                'Weight': 1
-            })
-        
-        edges_df = pd.DataFrame(edges_data)
-        edges_df.to_csv(edges_file, index=False, encoding='utf-8-sig')
-        
-        print(f"\n✓ Graph exported to Gephi format")
-        print(f"   • Nodes: {nodes_file}")
-        print(f"   • Edges: {edges_file}")
-        return nodes_file, edges_file
-    
-    def visualize_graph(self, save_file='product_graph.png'):
-        """Visualize the graph with matplotlib"""
-        if self.graph.number_of_nodes() == 0:
-            print("❌ Graph is empty. No data to visualize.")
-            return
-        
-        plt.figure(figsize=(20, 16))
-        
-        # Define colors for different node types
-        color_map = {
-            'Product': '#FF6B6B',      # Red
-            'Brand': '#4ECDC4',         # Turquoise
-            'Category': '#95E1D3',      # Mint
-            'Source': '#FFD93D',        # Yellow
-            'PriceRange': '#A8E6CF',    # Light green
-            'Rating': '#FFB6B9',        # Pink
-            'Specification': '#C7CEEA'  # Lavender
-        }
-        
-        # Get node colors based on type
-        node_colors = [color_map.get(self.graph.nodes[node].get('type', 'Unknown'), '#CCCCCC') 
-                      for node in self.graph.nodes()]
-        
-        # Calculate node sizes based on degree (connections)
-        node_sizes = [300 + self.graph.degree(node) * 100 for node in self.graph.nodes()]
-        
-        # Use spring layout for better visualization
-        pos = nx.spring_layout(self.graph, k=2, iterations=50, seed=42)
-        
-        # Draw edges
-        nx.draw_networkx_edges(self.graph, pos, alpha=0.2, arrows=True, 
-                              arrowsize=10, edge_color='gray', width=1.5)
-        
-        # Draw nodes
-        nx.draw_networkx_nodes(self.graph, pos, node_color=node_colors, 
-                              node_size=node_sizes, alpha=0.9, linewidths=2, 
-                              edgecolors='black')
-        
-        # Draw labels (only for non-product nodes to reduce clutter)
-        labels = {}
-        for node in self.graph.nodes():
-            node_type = self.graph.nodes[node].get('type', '')
-            if node_type != 'Product' and node_type != 'Specification':
-                name = self.graph.nodes[node].get('name', node)
-                labels[node] = name[:20]  # Truncate long names
-        
-        nx.draw_networkx_labels(self.graph, pos, labels, font_size=8, 
-                               font_weight='bold', font_color='black')
-        
-        # Add legend
-        legend_elements = [plt.Line2D([0], [0], marker='o', color='w', 
-                                     markerfacecolor=color, markersize=10, 
-                                     label=node_type) 
-                          for node_type, color in color_map.items()]
-        
-        plt.legend(handles=legend_elements, loc='upper left', fontsize=10, 
-                  framealpha=0.9, title='Node Types')
-        
-        plt.title('Product Knowledge Graph', fontsize=20, fontweight='bold', pad=20)
-        plt.axis('off')
-        plt.tight_layout()
-        
-        # Save
-        plt.savefig(save_file, dpi=300, bbox_inches='tight', facecolor='white')
-        print(f"\n✓ Graph visualization saved to {save_file}")
-        
-        # Show
-        plt.show()
-        
-    def get_product_recommendations(self, product_id, top_k=5):
-        """Get similar products based on graph connections"""
-        if not self.graph.has_node(product_id):
-            return []
-        
-        # Find products with similar connections
-        product_neighbors = set(self.graph.neighbors(product_id))
-        
-        recommendations = []
-        for other_product in self.node_types['Product']:
-            if other_product != product_id:
-                other_neighbors = set(self.graph.neighbors(other_product))
-                common_neighbors = product_neighbors.intersection(other_neighbors)
-                similarity_score = len(common_neighbors) / max(len(product_neighbors), 1)
-                
-                if similarity_score > 0:
-                    recommendations.append({
-                        'product_id': other_product,
-                        'similarity': similarity_score,
-                        'common_attributes': len(common_neighbors)
-                    })
-        
-        # Sort by similarity
-        recommendations.sort(key=lambda x: x['similarity'], reverse=True)
-        return recommendations[:top_k]
 
 
 # ===========================
@@ -512,7 +201,6 @@ class ProductRAGStorage:
         self.products = []
         self.vectorizer = TfidfVectorizer(max_features=500)
         self.vectors = None
-        self.graph_db = ProductGraphDatabase()  # Add graph database
         self.load_storage()
     
     def add_product(self, product_data):
@@ -520,7 +208,6 @@ class ProductRAGStorage:
         product_data['timestamp'] = datetime.now().isoformat()
         product_data['id'] = f"{product_data['source']}_{len(self.products)}"
         self.products.append(product_data)
-        self.graph_db.add_product_node(product_data)  # Add to graph
         self._update_vectors()
         self.save_storage()
     
@@ -530,7 +217,6 @@ class ProductRAGStorage:
             product['timestamp'] = datetime.now().isoformat()
             product['id'] = f"{product.get('source', 'unknown')}_{len(self.products)}"
             self.products.append(product)
-            self.graph_db.add_product_node(product)  # Add to graph
         self._update_vectors()
         self.save_storage()
     
@@ -637,21 +323,25 @@ class ProductRAGStorage:
         }
         with open(self.storage_file, 'wb') as f:
             pickle.dump(data, f)
-        
-        # Auto-export to CSV after every save
-        self.auto_export_to_csv()
     
-    def auto_export_to_csv(self):
-        """Automatically export to CSV with timestamp"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        
-        # Export to timestamped file
-        timestamped_file = f'products_export_{timestamp}.csv'
-        
-        # Also maintain a "latest" file
-        latest_file = 'products_export_latest.csv'
-        
+    def load_storage(self):
+        """Load storage from disk"""
+        try:
+            with open(self.storage_file, 'rb') as f:
+                data = pickle.load(f)
+                self.products = data.get('products', [])
+                self.vectorizer = data.get('vectorizer', TfidfVectorizer(max_features=500))
+                self.vectors = data.get('vectors')
+            print(f"Loaded {len(self.products)} products from storage")
+        except FileNotFoundError:
+            print("No existing storage found, starting fresh")
+        except Exception as e:
+            print(f"Error loading storage: {e}")
+    
+    def export_to_csv(self, filename='products_export.csv'):
+        """Export products to CSV"""
         if not self.products:
+            print("No products to export")
             return
         
         # Flatten nested dictionaries for CSV
@@ -662,7 +352,6 @@ class ProductRAGStorage:
             # Flatten technical_details
             if 'technical_details' in flat and isinstance(flat['technical_details'], dict):
                 for k, v in flat['technical_details'].items():
-                    # Clean key name for CSV column
                     clean_key = k.replace(' - ', '_').replace(' ', '_').replace('/', '_')
                     flat[f'spec_{clean_key}'] = v
                 del flat['technical_details']
@@ -681,192 +370,14 @@ class ProductRAGStorage:
             flattened.append(flat)
         
         df = pd.DataFrame(flattened)
-        
-        # Save both files
-        df.to_csv(timestamped_file, index=False, encoding='utf-8-sig')
-        df.to_csv(latest_file, index=False, encoding='utf-8-sig')
-        
-        print(f"   📁 Auto-exported to: {timestamped_file}")
-        print(f"   📁 Updated: {latest_file}")
-    
-    def load_storage(self):
-        """Load storage from disk"""
-        try:
-            with open(self.storage_file, 'rb') as f:
-                data = pickle.load(f)
-                self.products = data.get('products', [])
-                self.vectorizer = data.get('vectorizer', TfidfVectorizer(max_features=500))
-                self.vectors = data.get('vectors')
-            print(f"Loaded {len(self.products)} products from storage")
-            
-            # Rebuild graph database from loaded products
-            if self.products:
-                print(f"🕸️  Rebuilding knowledge graph from {len(self.products)} products...")
-                for product in self.products:
-                    self.graph_db.add_product_node(product)
-                print(f"✓ Graph rebuilt: {self.graph_db.get_graph_stats()['total_nodes']} nodes, {self.graph_db.get_graph_stats()['total_edges']} edges")
-        except FileNotFoundError:
-            print("No existing storage found, starting fresh")
-        except Exception as e:
-            print(f"Error loading storage: {e}")
-    
-    def export_to_csv(self, filename='products_export.csv'):
-        """Export products to CSV with enhanced GraphRAG-like structure"""
-        if not self.products:
-            print("No products to export")
-            return
-        
-        # Create multiple CSV files for GraphRAG structure
-        base_name = filename.replace('.csv', '')
-        
-        # 1. Main products file
-        flattened = []
-        for p in self.products:
-            flat = p.copy()
-            
-            # Flatten technical_details
-            if 'technical_details' in flat and isinstance(flat['technical_details'], dict):
-                for k, v in flat['technical_details'].items():
-                    clean_key = k.replace(' - ', '_').replace(' ', '_').replace('/', '_')
-                    flat[f'spec_{clean_key}'] = v
-                del flat['technical_details']
-            
-            # Flatten additional_info
-            if 'additional_info' in flat and isinstance(flat['additional_info'], dict):
-                for k, v in flat['additional_info'].items():
-                    clean_key = k.replace(' - ', '_').replace(' ', '_').replace('/', '_')
-                    flat[f'info_{clean_key}'] = v
-                del flat['additional_info']
-            
-            # Convert features list to string
-            if 'features' in flat and isinstance(flat['features'], list):
-                flat['features'] = ' | '.join(flat['features'])
-            
-            flattened.append(flat)
-        
-        # Export main products
-        df_products = pd.DataFrame(flattened)
-        df_products.to_csv(filename, index=False, encoding='utf-8-sig')
+        df.to_csv(filename, index=False, encoding='utf-8-sig')
         print(f"✓ Exported {len(self.products)} products to {filename}")
-        
-        # 2. Export specifications as separate graph (for GraphRAG)
-        specs_data = []
-        for p in self.products:
-            product_id = p.get('id', '')
-            product_name = p.get('name', '')
-            
-            if 'technical_details' in p and isinstance(p['technical_details'], dict):
-                for spec_name, spec_value in p['technical_details'].items():
-                    specs_data.append({
-                        'product_id': product_id,
-                        'product_name': product_name,
-                        'specification_name': spec_name,
-                        'specification_value': spec_value,
-                        'source': p.get('source', '')
-                    })
-        
-        if specs_data:
-            df_specs = pd.DataFrame(specs_data)
-            specs_file = f"{base_name}_specifications.csv"
-            df_specs.to_csv(specs_file, index=False, encoding='utf-8-sig')
-            print(f"✓ Exported {len(specs_data)} specifications to {specs_file}")
-        
-        # 3. Export relationships (product-category-source graph)
-        relationships = []
-        for p in self.products:
-            relationships.append({
-                'product_id': p.get('id', ''),
-                'product_name': p.get('name', ''),
-                'category': p.get('category', ''),
-                'source': p.get('source', ''),
-                'price': p.get('price_numeric', 0),
-                'rating': p.get('rating', ''),
-                'timestamp': p.get('timestamp', '')
-            })
-        
-        df_relations = pd.DataFrame(relationships)
-        relations_file = f"{base_name}_relationships.csv"
-        df_relations.to_csv(relations_file, index=False, encoding='utf-8-sig')
-        print(f"✓ Exported {len(relationships)} relationships to {relations_file}")
     
     def clear_storage(self):
         """Clear all stored products"""
         self.products = []
         self.vectors = None
         self.save_storage()
-    
-    def get_product_graph(self):
-        """Get product relationships as a graph structure for GraphRAG"""
-        graph = {
-            'nodes': [],
-            'edges': []
-        }
-        
-        # Create nodes for products
-        for p in self.products:
-            graph['nodes'].append({
-                'id': p.get('id'),
-                'type': 'product',
-                'name': p.get('name'),
-                'category': p.get('category'),
-                'source': p.get('source'),
-                'price': p.get('price_numeric', 0)
-            })
-        
-        # Create nodes for categories and sources
-        categories = set(p.get('category') for p in self.products)
-        sources = set(p.get('source') for p in self.products)
-        
-        for cat in categories:
-            if cat:
-                graph['nodes'].append({
-                    'id': f'cat_{cat}',
-                    'type': 'category',
-                    'name': cat
-                })
-        
-        for src in sources:
-            if src:
-                graph['nodes'].append({
-                    'id': f'src_{src}',
-                    'type': 'source',
-                    'name': src
-                })
-        
-        # Create edges (relationships)
-        for p in self.products:
-            product_id = p.get('id')
-            
-            # Product -> Category edge
-            if p.get('category'):
-                graph['edges'].append({
-                    'from': product_id,
-                    'to': f"cat_{p.get('category')}",
-                    'type': 'belongs_to'
-                })
-            
-            # Product -> Source edge
-            if p.get('source'):
-                graph['edges'].append({
-                    'from': product_id,
-                    'to': f"src_{p.get('source')}",
-                    'type': 'sold_by'
-                })
-        
-        return graph
-    
-    def export_graph_to_json(self, filename='product_graph.json'):
-        """Export the product graph as JSON for GraphRAG visualization"""
-        graph = self.get_product_graph()
-        
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(graph, f, indent=2, ensure_ascii=False)
-        
-        print(f"✓ Exported product graph to {filename}")
-        print(f"  - {len([n for n in graph['nodes'] if n['type'] == 'product'])} product nodes")
-        print(f"  - {len([n for n in graph['nodes'] if n['type'] == 'category'])} category nodes")
-        print(f"  - {len([n for n in graph['nodes'] if n['type'] == 'source'])} source nodes")
-        print(f"  - {len(graph['edges'])} edges")
 
 # ===========================
 # Enhanced Web Scraping
@@ -1807,171 +1318,8 @@ def filter_only_phones(products, search_term):
 
 
 # ===========================
-# Visualization Functions
+# Report Generation
 # ===========================
-
-def create_comprehensive_graphs(rag_storage):
-    """Create comprehensive analysis graphs from RAG database"""
-    if not rag_storage.products:
-        print("No products in database to visualize")
-        return
-    
-    df = pd.DataFrame(rag_storage.products)
-    
-    # Create figure with subplots
-    fig = plt.figure(figsize=(18, 12))
-    gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
-    
-    fig.suptitle('Comprehensive Product Analysis Dashboard', fontsize=20, fontweight='bold')
-    
-    # 1. Price Distribution by Source
-    ax1 = fig.add_subplot(gs[0, 0])
-    if 'source' in df.columns and 'price_numeric' in df.columns:
-        df_price = df[df['price_numeric'] > 0]
-        sources = df_price['source'].unique()
-        for source in sources:
-            source_data = df_price[df_price['source'] == source]['price_numeric']
-            ax1.hist(source_data, alpha=0.6, label=source, bins=15)
-        ax1.set_xlabel('Price (₹)', fontsize=10)
-        ax1.set_ylabel('Frequency', fontsize=10)
-        ax1.set_title('Price Distribution by Source', fontsize=12, fontweight='bold')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-    
-    # 2. Price Comparison Boxplot
-    ax2 = fig.add_subplot(gs[0, 1])
-    if 'source' in df.columns and 'price_numeric' in df.columns:
-        df_price = df[df['price_numeric'] > 0]
-        sources = df_price['source'].unique()
-        data_to_plot = [df_price[df_price['source'] == s]['price_numeric'].values for s in sources]
-        bp = ax2.boxplot(data_to_plot, labels=sources, patch_artist=True)
-        for patch in bp['boxes']:
-            patch.set_facecolor('lightblue')
-        ax2.set_ylabel('Price (₹)', fontsize=10)
-        ax2.set_title('Price Range Comparison', fontsize=12, fontweight='bold')
-        ax2.grid(True, alpha=0.3)
-    
-    # 3. Category Distribution
-    ax3 = fig.add_subplot(gs[0, 2])
-    if 'category' in df.columns:
-        category_counts = df['category'].value_counts()
-        colors = plt.cm.Set3(range(len(category_counts)))
-        wedges, texts, autotexts = ax3.pie(category_counts, labels=category_counts.index, 
-                                            autopct='%1.1f%%', colors=colors, startangle=90)
-        for autotext in autotexts:
-            autotext.set_color('white')
-            autotext.set_fontweight('bold')
-        ax3.set_title('Products by Category', fontsize=12, fontweight='bold')
-    
-    # 4. Rating Distribution
-    ax4 = fig.add_subplot(gs[1, 0])
-    if 'rating' in df.columns:
-        ratings = []
-        for rating_str in df['rating']:
-            match = re.search(r'(\d+\.?\d*)', str(rating_str))
-            if match:
-                ratings.append(float(match.group(1)))
-        
-        if ratings:
-            ax4.hist(ratings, bins=10, color='gold', edgecolor='black', alpha=0.7)
-            ax4.set_xlabel('Rating', fontsize=10)
-            ax4.set_ylabel('Frequency', fontsize=10)
-            ax4.set_title('Rating Distribution', fontsize=12, fontweight='bold')
-            ax4.grid(True, alpha=0.3)
-            ax4.axvline(np.mean(ratings), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(ratings):.2f}')
-            ax4.legend()
-    
-    # 5. Top 10 Products by Price
-    ax5 = fig.add_subplot(gs[1, 1])
-    if 'price_numeric' in df.columns and 'name' in df.columns:
-        df_sorted = df[df['price_numeric'] > 0].nsmallest(10, 'price_numeric')
-        y_pos = range(len(df_sorted))
-        # Truncate long names
-        names = [name[:30] + '...' if len(name) > 30 else name for name in df_sorted['name']]
-        ax5.barh(y_pos, df_sorted['price_numeric'], color='green', alpha=0.7)
-        ax5.set_yticks(y_pos)
-        ax5.set_yticklabels(names, fontsize=8)
-        ax5.set_xlabel('Price (₹)', fontsize=10)
-        ax5.set_title('Top 10 Lowest Priced Products', fontsize=12, fontweight='bold')
-        ax5.grid(True, alpha=0.3)
-    
-    # 6. Price vs Rating Scatter
-    ax6 = fig.add_subplot(gs[1, 2])
-    if 'price_numeric' in df.columns and 'rating' in df.columns:
-        prices = []
-        ratings = []
-        for _, row in df.iterrows():
-            price = row.get('price_numeric', 0)
-            rating_str = row.get('rating', '')
-            match = re.search(r'(\d+\.?\d*)', str(rating_str))
-            if price > 0 and match:
-                prices.append(price)
-                ratings.append(float(match.group(1)))
-        
-        if prices and ratings:
-            ax6.scatter(prices, ratings, alpha=0.6, c='purple', s=50)
-            ax6.set_xlabel('Price (₹)', fontsize=10)
-            ax6.set_ylabel('Rating', fontsize=10)
-            ax6.set_title('Price vs Rating', fontsize=12, fontweight='bold')
-            ax6.grid(True, alpha=0.3)
-    
-    # 7. Products by Source
-    ax7 = fig.add_subplot(gs[2, 0])
-    if 'source' in df.columns:
-        source_counts = df['source'].value_counts()
-        ax7.bar(source_counts.index, source_counts.values, color=['#FF6B6B', '#4ECDC4'], alpha=0.8)
-        ax7.set_xlabel('Source', fontsize=10)
-        ax7.set_ylabel('Number of Products', fontsize=10)
-        ax7.set_title('Products by Source', fontsize=12, fontweight='bold')
-        ax7.grid(True, alpha=0.3, axis='y')
-        for i, v in enumerate(source_counts.values):
-            ax7.text(i, v + 0.5, str(v), ha='center', va='bottom', fontweight='bold')
-    
-    # 8. Average Price by Source
-    ax8 = fig.add_subplot(gs[2, 1])
-    if 'source' in df.columns and 'price_numeric' in df.columns:
-        df_price = df[df['price_numeric'] > 0]
-        avg_prices = df_price.groupby('source')['price_numeric'].mean()
-        ax8.bar(avg_prices.index, avg_prices.values, color=['#FFD93D', '#6BCB77'], alpha=0.8)
-        ax8.set_xlabel('Source', fontsize=10)
-        ax8.set_ylabel('Average Price (₹)', fontsize=10)
-        ax8.set_title('Average Price by Source', fontsize=12, fontweight='bold')
-        ax8.grid(True, alpha=0.3, axis='y')
-        for i, v in enumerate(avg_prices.values):
-            ax8.text(i, v + 500, f'₹{v:.0f}', ha='center', va='bottom', fontweight='bold')
-    
-    # 9. Statistics Summary
-    ax9 = fig.add_subplot(gs[2, 2])
-    ax9.axis('off')
-    stats = rag_storage.get_statistics()
-    
-    stats_text = "DATABASE STATISTICS\n\n"
-    stats_text += f"Total Products: {stats.get('total_products', 0)}\n"
-    stats_text += f"Detailed Products: {stats.get('detailed_products', 0)}\n\n"
-    
-    if stats.get('price_stats'):
-        ps = stats['price_stats']
-        stats_text += "PRICE STATISTICS\n"
-        stats_text += f"Min: ₹{ps['min']:.2f}\n"
-        stats_text += f"Max: ₹{ps['max']:.2f}\n"
-        stats_text += f"Avg: ₹{ps['avg']:.2f}\n"
-        stats_text += f"Median: ₹{ps['median']:.2f}\n\n"
-    
-    if stats.get('rating_stats'):
-        rs = stats['rating_stats']
-        stats_text += "RATING STATISTICS\n"
-        stats_text += f"Min: {rs['min']:.1f}⭐\n"
-        stats_text += f"Max: {rs['max']:.1f}⭐\n"
-        stats_text += f"Avg: {rs['avg']:.2f}⭐\n"
-    
-    ax9.text(0.1, 0.9, stats_text, transform=ax9.transAxes, fontsize=10,
-             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
-             family='monospace')
-    
-    plt.savefig('product_analysis_comprehensive.png', dpi=300, bbox_inches='tight')
-    print("\n✓ Comprehensive graph saved as 'product_analysis_comprehensive.png'")
-    plt.show()
-
 
 def create_detailed_report(rag_storage):
     """Create detailed statistics report"""
@@ -2274,51 +1622,113 @@ def display_results_gui_with_details(df, rag_storage):
     canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
     
-    # Bottom buttons
-    button_frame = ttk.Frame(root)
-    button_frame.pack(fill=tk.X, padx=10, pady=10)
-    
-    def show_graphs():
-        create_comprehensive_graphs(rag_storage)
-    
-    graph_btn = tk.Button(button_frame, text="📊 Show Analysis Graphs", 
-                         command=show_graphs, bg="#2ecc71", fg="white",
-                         font=("Arial", 11, "bold"), padx=20, pady=8)
-    graph_btn.pack(side=tk.LEFT, padx=5)
-    
-    def export_data():
-        rag_storage.export_to_csv('products_detailed_export.csv')
-        messagebox.showinfo("Export", "Data exported to products_detailed_export.csv")
-    
-    export_btn = tk.Button(button_frame, text="💾 Export to CSV", 
-                          command=export_data, bg="#9b59b6", fg="white",
-                          font=("Arial", 11, "bold"), padx=20, pady=8)
-    export_btn.pack(side=tk.LEFT, padx=5)
-    
     root.mainloop()
 
 
 # ===========================
-# Main Agent Function
+# Unified RAG Search Function
 # ===========================
 
-def smart_product_agent(product_name, rag_storage, max_products=5):
-    """Main agent that scrapes detailed info, stores in RAG, and analyzes"""
+def unified_rag_search(product_name, rag_storage, max_products=5):
+    """
+    Unified RAG-based search with the following strategy:
+    1. Search locally first (fast, cached)
+    2. Fuzzy match if needed (flexible retrieval)
+    3. Fetch externally as last resort (always grows knowledge base)
+    4. Always enrich with fresh data (never stale, even cached results get updated)
+    5. Use LLM to structure unstructured web data (converts messy snippets to clean schema)
+    
+    Returns:
+        DataFrame with results
+    """
     print(f"\n{'='*70}")
-    print(f"SMART PRODUCT AGENT - DEEP SCRAPER".center(70))
+    print(f"🔍 UNIFIED RAG SEARCH".center(70))
     print(f"{'='*70}")
-    print(f"Search Query: {product_name}")
-    print(f"Max Products per Source: {max_products}")
+    print(f"Query: {product_name}")
+    
+    # Step 1: Search locally first (exact match)
+    print(f"\n📊 Step 1: Searching local database (exact match)...")
+    print("-"*70)
+    
+    local_results = []
+    q = product_name.lower()
+    for item in rag_storage.products:
+        if q in str(item.get('name', '')).lower() or q in str(item.get('category', '')).lower():
+            local_results.append(item)
+    
+    if local_results:
+        print(f"✓ Found {len(local_results)} exact matches in local database!")
+        result_df = pd.DataFrame(local_results)
+        
+        # Step 4: Always enrich with fresh data
+        print(f"\n🌐 Step 4: Enriching cached results with fresh web data...")
+        print("-"*70)
+        
+        # Build generic RAG pipeline for enrichment
+        pipeline = build_generic_rag()
+        
+        # Enrich each product with fresh web data via RAG pipeline
+        for idx, product in enumerate(local_results):
+            try:
+                print(f"  Enriching product {idx+1}/{len(local_results)}: {product.get('name', '')[:50]}...")
+                enriched = pipeline._web_enrichment(product_name, product.get('name', product_name))
+                if enriched:
+                    product.update(enriched)
+            except Exception as e:
+                print(f"  Warning: Enrichment failed for product {idx+1}: {e}")
+        
+        # Update storage with enriched data
+        rag_storage.save_storage()
+        print(f"✓ Enriched {len(local_results)} products with fresh data")
+        
+        result_df = pd.DataFrame(local_results).sort_values(by="price_numeric")
+        return result_df
+    
+    # Step 2: Fuzzy match if needed
+    print(f"❌ No exact matches found")
+    print(f"\n🔍 Step 2: Fuzzy matching in local database...")
+    print("-"*70)
+    
+    fuzzy_results = rag_storage.semantic_search(product_name, top_k=20)
+    
+    if fuzzy_results:
+        print(f"✓ Found {len(fuzzy_results)} fuzzy matches!")
+        
+        # Step 4: Always enrich with fresh data
+        print(f"\n🌐 Step 4: Enriching fuzzy matches with fresh web data...")
+        print("-"*70)
+        
+        pipeline = build_generic_rag()
+        
+        for idx, product in enumerate(fuzzy_results):
+            try:
+                print(f"  Enriching product {idx+1}/{len(fuzzy_results)}: {product.get('name', '')[:50]}...")
+                enriched = pipeline._web_enrichment(product_name, product.get('name', product_name))
+                if enriched:
+                    product.update(enriched)
+            except Exception as e:
+                print(f"  Warning: Enrichment failed for product {idx+1}: {e}")
+        
+        # Update storage
+        rag_storage.save_storage()
+        print(f"✓ Enriched {len(fuzzy_results)} products with fresh data")
+        
+        result_df = pd.DataFrame(fuzzy_results).sort_values(by="price_numeric")
+        return result_df
+    
+    # Step 3: Fetch externally as last resort (always grows knowledge base)
+    print(f"❌ No fuzzy matches found")
+    print(f"\n🌐 Step 3: Fetching fresh data from external sources...")
     print(f"{'='*70}\n")
     
     driver = setup_driver()
     
     try:
-        print("STEP 1: Deep Scraping Amazon with Full Product Details...")
+        print("Scraping Amazon with Full Product Details...")
         print("-"*70)
         amazon_products = scrape_detailed_amazon(driver, product_name, max_products)
         
-        print("\nSTEP 2: Deep Scraping Flipkart with Full Product Details...")
+        print("\nScraping Flipkart with Full Product Details...")
         print("-"*70)
         flipkart_products = scrape_detailed_flipkart(driver, product_name, max_products)
         
@@ -2343,16 +1753,34 @@ def smart_product_agent(product_name, rag_storage, max_products=5):
     if not all_products:
         print("\n❌ No products found after filtering.")
         return None
+    
+    # Step 5: Use LLM to structure unstructured web data
+    print(f"\n🤖 Step 5: Using LLM to structure and enrich product data...")
+    print("-"*70)
+    
+    pipeline = build_generic_rag()
+    
+    for idx, product in enumerate(all_products):
+        try:
+            print(f"  Structuring product {idx+1}/{len(all_products)}: {product.get('name', '')[:50]}...")
+            # Use LLM to extract and structure additional information
+            enriched = pipeline._web_enrichment(product_name, product.get('name', product_name))
+            if enriched:
+                product.update(enriched)
+        except Exception as e:
+            print(f"  Warning: LLM enrichment failed for product {idx+1}: {e}")
+    
+    print(f"✓ Structured and enriched {len(all_products)} products with LLM")
 
     print(f"\n{'='*70}")
-    print("STEP 3: Storing Products in RAG Database...")
+    print("Storing Products in RAG Database (growing knowledge base)...")
     print("-"*70)
     rag_storage.add_products_batch(all_products)
     print(f"✓ Successfully stored {len(all_products)} products with full details")
     print(f"✓ Auto-saved to database: {rag_storage.storage_file}")
     
     print(f"\n{'='*70}")
-    print("STEP 4: Generating Comprehensive Analysis Report...")
+    print("Generating Analysis Report...")
     print("-"*70)
     create_detailed_report(rag_storage)
     
@@ -2366,7 +1794,7 @@ def smart_product_agent(product_name, rag_storage, max_products=5):
     df = df.sort_values(by="price_numeric")
     
     print(f"{'='*70}")
-    print("AGENT EXECUTION COMPLETED SUCCESSFULLY!".center(70))
+    print("UNIFIED RAG SEARCH COMPLETED!".center(70))
     print(f"{'='*70}")
     print(f"\n📊 Total Products Found: {len(df)}")
     if not df.empty and 'price_numeric' in df.columns:
@@ -2390,86 +1818,6 @@ def smart_product_agent(product_name, rag_storage, max_products=5):
 
 
 # ===========================
-# Smart Search Function
-# ===========================
-
-def smart_search_products(product_name, rag_storage, max_products=5, force_new_scrape=False):
-    """
-    Smart search that checks database first, only scrapes if needed.
-    
-    Args:
-        product_name: Product to search for
-        rag_storage: ProductRAGStorage instance
-        max_products: Max products per source for new scrapes
-        force_new_scrape: If True, always scrape new data
-    
-    Returns:
-        DataFrame with results and boolean indicating if new scrape was done
-    """
-    print(f"\n{'='*70}")
-    print(f"🔍 SMART PRODUCT SEARCH".center(70))
-    print(f"{'='*70}")
-    print(f"Query: {product_name}")
-    
-    # Step 1: Check database first (unless forced)
-    if not force_new_scrape:
-        print(f"\n📊 Step 1: Checking GraphRAG Database...")
-        print("-"*70)
-        
-        db_results = rag_storage.semantic_search(product_name, top_k=20)
-        
-        if db_results:
-            print(f"✓ Found {len(db_results)} matching products in database!")
-            
-            # Analyze freshness
-            result_df = pd.DataFrame(db_results)
-            
-            # Count products per source
-            source_counts = result_df['source'].value_counts().to_dict()
-            print(f"\n📦 Database contains:")
-            for source, count in source_counts.items():
-                print(f"   • {source}: {count} products")
-            
-            # Check if we have enough diverse results
-            has_both_sources = len(source_counts) >= 2
-            has_enough_products = len(db_results) >= (max_products * 0.6)  # At least 60% of requested
-            
-            if has_both_sources and has_enough_products:
-                print(f"\n✅ Database has sufficient data!")
-                print("💡 Using cached results (faster, saves resources)")
-                
-                choice = input("\n🤔 Use cached data or scrape fresh? (cached/fresh): ").strip().lower()
-                
-                if choice in ['cached', 'c', '']:
-                    print("\n✓ Using cached database results")
-                    result_df = result_df.sort_values(by="price_numeric")
-                    return result_df, False
-                else:
-                    print("\n🌐 Starting fresh web scrape...")
-            else:
-                print(f"\n⚠️  Database results incomplete:")
-                if not has_both_sources:
-                    print("   • Missing data from some sources")
-                if not has_enough_products:
-                    print(f"   • Only {len(db_results)} products (requested {max_products} per source)")
-                print("\n🌐 Performing fresh web scrape for better results...")
-        else:
-            print(f"❌ No matching products found in database")
-            print("🌐 Starting fresh web scrape...")
-    else:
-        print(f"\n🌐 Force scrape enabled - bypassing database check")
-    
-    # Step 2: Perform fresh scrape
-    print(f"\n{'='*70}")
-    print(f"🌐 FRESH WEB SCRAPE".center(70))
-    print(f"{'='*70}\n")
-    
-    result_df = smart_product_agent(product_name, rag_storage, max_products)
-    
-    return result_df, True
-
-
-# ===========================
 # Main Execution
 # ===========================
 
@@ -2478,165 +1826,48 @@ if __name__ == "__main__":
     rag_storage = ProductRAGStorage('product_rag_database.pkl')
     
     print("\n" + "="*70)
-    print("🛍️  SMART PRODUCT COMPARISON SYSTEM (GraphRAG)".center(70))
+    print("🛍️  E-COMMERCE PRICE COMPARISON WITH RAG".center(70))
     print("="*70)
     print("\n📋 Main Menu:")
-    print("1. 🛒 Smart Product Search (Auto-checks Database First)")
-    print("2. 🌐 Force New Web Scrape (Bypass Database)")
-    print("3. 🔎 Search in Database Only (Semantic Search)")
-    print("4. 📊 View Database Statistics")
-    print("5. 📈 Show Analysis Graphs")
-    print("6. 🕸️  Visualize Knowledge Graph")
-    print("7. 📁 Export Graph (Neo4j/Gephi Format)")
-    print("8. 💾 Export Database to CSV (GraphRAG Structure)")
-    print("9. 🌐 Export Product Graph (JSON)")
-    print("10. 🗑️  Clear Database")
-    print("11. 🚪 Exit")
-    print("12. 🔎 Generic RAG Pipeline (SerpAPI + Gemini)")
-    
-    print("6. 💾 Export Database to CSV (GraphRAG Structure)")
-    print("7. 🌐 Export Product Graph (JSON)")
-    print("8. 🗑️  Clear Database")
-    print("9. 🚪 Exit")
+    print("1. 🔍 Search Products (Unified RAG: Local → Fuzzy → Web + LLM Enrichment)")
+    print("2. 📊 View Database Statistics")
+    print("3. 🗑️  Clear Database")
+    print("4. 🚪 Exit")
     
     while True:
-        choice = input("\nEnter choice (1-11): ").strip()
+        choice = input("\nEnter choice (1-4): ").strip()
         
         if choice == "1":
-            # Smart search - checks database first
+            # Unified RAG search
             product_name = input("\n🔍 Enter product name to search: ").strip()
             if product_name:
                 max_products = input("📦 How many products per source? (default: 5): ").strip()
                 max_products = int(max_products) if max_products.isdigit() else 5
                 
-                result_df, did_scrape = smart_search_products(product_name, rag_storage, max_products, force_new_scrape=False)
+                result_df = unified_rag_search(product_name, rag_storage, max_products)
                 
                 if result_df is not None and not result_df.empty:
-                    if did_scrape:
-                        print("\n✓ Fresh data scraped and stored in GraphRAG database")
-                    else:
-                        print("\n✓ Results loaded from GraphRAG database")
-                    
                     print("\n🖥️  Opening GUI with detailed product information...")
                     display_results_gui_with_details(result_df, rag_storage)
                 else:
                     print("\n❌ No products found.")
         
         elif choice == "2":
-            # Force new scrape
-            product_name = input("\n🌐 Enter product name to search: ").strip()
-            if product_name:
-                max_products = input("📦 How many products per source? (default: 5): ").strip()
-                max_products = int(max_products) if max_products.isdigit() else 5
-                
-                result_df, _ = smart_search_products(product_name, rag_storage, max_products, force_new_scrape=True)
-                
-                if result_df is not None and not result_df.empty:
-                    print("\n✓ Fresh data scraped and stored in GraphRAG database")
-                    print("\n🖥️  Opening GUI with detailed product information...")
-                    display_results_gui_with_details(result_df, rag_storage)
-                else:
-                    print("\n❌ No products found.")
-        
-        elif choice == "3":
-            # Database search only
-            query = input("\n🔎 Enter search query: ").strip()
-            if query:
-                results = rag_storage.semantic_search(query, top_k=20)
-                if results:
-                    result_df = pd.DataFrame(results)
-                    result_df = result_df.sort_values(by="price_numeric")
-                    print(f"\n✓ Found {len(result_df)} matching products in database")
-                    display_results_gui_with_details(result_df, rag_storage)
-                else:
-                    print("\n❌ No matching products found in database.")
-        
-        elif choice == "4":
             # Statistics
             create_detailed_report(rag_storage)
-            # Also show graph stats
-            print("\n" + "="*70)
-            print("📊 KNOWLEDGE GRAPH STATISTICS")
-            print("="*70)
-            stats = rag_storage.graph_db.get_graph_stats()
-            for key, value in stats.items():
-                print(f"{key.replace('_', ' ').title():30} : {value}")
         
-        elif choice == "5":
-            # Graphs
-            create_comprehensive_graphs(rag_storage)
-        
-        elif choice == "6":
-            # Visualize Knowledge Graph
-            print("\n🕸️  Generating Knowledge Graph Visualization...")
-            rag_storage.graph_db.visualize_graph('product_knowledge_graph.png')
-        
-        elif choice == "7":
-            # Export graph in Neo4j/Gephi format
-            print("\n📁 Export Options:")
-            print("1. Neo4j JSON format")
-            print("2. Gephi CSV format")
-            print("3. Both formats")
-            export_choice = input("Choose export format (1-3): ").strip()
-            
-            if export_choice == "1":
-                rag_storage.graph_db.export_to_neo4j_format('graph_neo4j.json')
-            elif export_choice == "2":
-                rag_storage.graph_db.export_to_gephi_format('graph_nodes.csv', 'graph_edges.csv')
-            elif export_choice == "3":
-                rag_storage.graph_db.export_to_neo4j_format('graph_neo4j.json')
-                rag_storage.graph_db.export_to_gephi_format('graph_nodes.csv', 'graph_edges.csv')
-            else:
-                print("❌ Invalid choice")
-        
-        elif choice == "8":
-            # Export CSV
-            filename = input("💾 Enter filename (default: products_detailed_export.csv): ").strip()
-            if not filename:
-                filename = "products_detailed_export.csv"
-            rag_storage.export_to_csv(filename)
-        
-        elif choice == "9":
-            # Export JSON graph
-            filename = input("🌐 Enter filename (default: product_graph.json): ").strip()
-            if not filename:
-                filename = "product_graph.json"
-            rag_storage.export_graph_to_json(filename)
-        
-        elif choice == "10":
+        elif choice == "3":
             # Clear database
             confirm = input("⚠️  Are you sure you want to clear all data? (yes/no): ").strip().lower()
             if confirm == "yes":
                 rag_storage.clear_storage()
                 print("✓ Database cleared successfully.")
         
-        elif choice == "11":
+        elif choice == "4":
             # Exit
             print("\n👋 Exiting... Goodbye!")
             break
-        elif choice == "12":
-            print("\nGeneric RAG Pipeline")
-            pipeline = build_generic_rag()
-            q = input("Enter any query/topic to run RAG (or blank to cancel): ").strip()
-            if not q:
-                continue
-            results = pipeline.search(q)
-            if not results:
-                print("No results.")
-                continue
-            print(f"\n✓ {len(results)} result(s)\n")
-            # Pretty print top 1-3
-            for idx, item in enumerate(results[:3], start=1):
-                print(f"Result {idx}:")
-                print(f"  Name: {item.get('name')}")
-                if item.get('key_facts'):
-                    print(f"  Key facts: {item.get('key_facts')}")
-                if item.get('attributes'):
-                    print(f"  Attributes: {item.get('attributes')}")
-                if item.get('related_items'):
-                    print(f"  Related: {item.get('related_items')}")
-                print("---")
         
         else:
-            print("❌ Invalid choice. Please enter 1-11.")
+            print("❌ Invalid choice. Please enter 1-4.")
 
