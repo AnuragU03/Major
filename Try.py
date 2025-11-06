@@ -922,6 +922,27 @@ def scrape_detailed_amazon(driver, product_name, max_products=5):
                 print(f"    Skipping - invalid link or name")
                 continue
             
+            # Skip accessories only if they're clearly accessories (not the product itself)
+            name_lower = name.lower()
+            # Only skip if it's CLEARLY an accessory product
+            is_accessory = False
+            if any(word in name_lower for word in ['back cover', 'phone case', 'mobile cover', 'protective case', 'screen protector', 'tempered glass', 'screen guard']):
+                is_accessory = True
+            if is_accessory:
+                print(f"    Skipping - accessory: {name[:60]}")
+                continue
+            
+            # Validate product matches search query (relaxed for watches)
+            search_tokens_lower = set(product_name.lower().split()) - {'mobile', 'phone', 'smartphone', 'the', 'a', 'an', 'best', 'new', 'latest', 'buy', 'watch', 'smart', 'smartwatch'}
+            if search_tokens_lower and len(search_tokens_lower) > 0:
+                brands = ['samsung', 'apple', 'iphone', 'oneplus', 'xiaomi', 'redmi', 'realme', 'oppo', 'vivo', 'pixel', 'galaxy', 'noise', 'titan', 'boat']
+                has_brand = any(brand in product_name.lower() for brand in brands)
+                if has_brand:
+                    brand_match = any(term in name_lower for term in search_tokens_lower)
+                    if not brand_match:
+                        print(f"    Skipping - doesn't match brand: {name[:60]}")
+                        continue
+            
             # Get basic info from search results
             price_text = "0"
             try:
@@ -1073,51 +1094,115 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
         try:
             print(f"  Scraping Flipkart product {processed_count + 1}/{max_products}...")
             
-            # Get product link first
+            # Get product link and name from link element
             product_link = ""
-            try:
-                link_elem = item.find_element(By.CSS_SELECTOR, "a[href*='/p/'], a.wjcEIp, a.CGtC98, a.rPDeLR")
-                href = link_elem.get_attribute("href")
-                if href and ('/p/' in href or '/product/' in href):
-                    # Clean the link
-                    if '?' in href:
-                        href = href.split('?')[0]
-                    product_link = href if href.startswith('http') else f"https://www.flipkart.com{href}"
-                    print(f"    Found link: {product_link[:60]}...")
-            except:
-                print(f"    No valid product link found, skipping...")
-                continue
-            
-            if not product_link or 'search' in product_link:
-                continue
-            
-            # Get product name - try multiple selectors
             name = ""
-            name_selectors = [
-                "div.KzDlHZ",
-                "div.wjcEIp", 
+            
+            # Try all link selectors
+            link_selectors = [
+                "a.wKTcLC",
+                "a[href*='/p/']",
                 "a.wjcEIp",
-                "div.syl9yP",
+                "a.CGtC98",
+                "a.rPDeLR",
                 "a.VJA3rP",
-                "div._2WkVRV",
                 "a.IRpwTa"
             ]
             
-            for sel in name_selectors:
+            for link_sel in link_selectors:
                 try:
-                    name_elem = item.find_element(By.CSS_SELECTOR, sel)
-                    name = name_elem.text.strip()
-                    # Clean up any numbering from the name
-                    name = re.sub(r'^\d+\.\s*', '', name)
-                    if name and len(name) > 5 and not name.startswith('₹'):
-                        print(f"    Found name: {name[:60]}")
-                        break
+                    link_elem = item.find_element(By.CSS_SELECTOR, link_sel)
+                    href = link_elem.get_attribute("href")
+                    if href and ('/p/' in href or '/product/' in href):
+                        if '?' in href:
+                            href = href.split('?')[0]
+                        product_link = href if href.startswith('http') else f"https://www.flipkart.com{href}"
+                        # Try to get name from link title attribute first
+                        name = link_elem.get_attribute("title") or link_elem.get_attribute("aria-label") or link_elem.text.strip()
+                        if product_link:
+                            print(f"    Found link: {product_link[:60]}...")
+                        if name and len(name) > 5:
+                            print(f"    Found name from link: {name[:60]}")
+                            break
                 except:
                     continue
             
-            if not name or len(name) < 5:
+            if not product_link:
+                print(f"    No valid product link found, skipping...")
+                continue
+            
+            if 'search' in product_link:
+                continue
+            
+            # If name not found or is generic, try other selectors
+            generic_names = ['bestseller', 'coming soon', 'new arrival', 'hot deal', 'sale']
+            if not name or len(name) < 5 or any(gen in name.lower() for gen in generic_names):
+                # Try to get all text from the item and extract product name
+                try:
+                    item_text = item.text
+                    lines = [line.strip() for line in item_text.split('\n') if line.strip()]
+                    for line in lines:
+                        # Skip lines that are clearly not product names
+                        if (len(line) > 15 and 
+                            not line.startswith('₹') and 
+                            not any(gen in line.lower() for gen in generic_names) and
+                            not line.replace(',', '').replace('(', '').replace(')', '').isdigit() and
+                            'rating' not in line.lower() and
+                            '%' not in line):
+                            name = line
+                            print(f"    Found name from item text: {name[:60]}")
+                            break
+                except:
+                    pass
+                
+                # If still not found, try specific selectors
+                if not name or len(name) < 10:
+                    name_selectors = [
+                        "div.KzDlHZ",
+                        "div.wjcEIp",
+                        "a.wjcEIp",
+                        "div.syl9yP",
+                        "a.VJA3rP",
+                        "div._2WkVRV",
+                        "a.IRpwTa",
+                        "div.rPDeLR",
+                        "div._4rR01T"
+                    ]
+                    
+                    for sel in name_selectors:
+                        try:
+                            name_elem = item.find_element(By.CSS_SELECTOR, sel)
+                            name = name_elem.text.strip()
+                            name = re.sub(r'^\d+\.\s*', '', name)
+                            if name and len(name) > 10 and not name.startswith('₹') and not any(gen in name.lower() for gen in generic_names):
+                                print(f"    Found name with selector '{sel}': {name[:60]}")
+                                break
+                        except:
+                            continue
+            
+            if not name or len(name) < 10 or any(gen in name.lower() for gen in generic_names):
                 print(f"    Failed to extract valid name, skipping...")
                 continue
+            
+            # Skip accessories only if they're clearly accessories
+            name_lower = name.lower()
+            is_accessory = False
+            if any(word in name_lower for word in ['back cover', 'phone case', 'mobile cover', 'protective case', 'screen protector', 'tempered glass', 'screen guard']):
+                is_accessory = True
+            if is_accessory:
+                print(f"    Skipping - accessory: {name[:60]}")
+                continue
+            
+            # Validate product matches search query (relaxed for watches)
+            search_tokens_lower = set(product_name.lower().split()) - {'mobile', 'phone', 'smartphone', 'the', 'a', 'an', 'best', 'new', 'latest', 'buy', 'watch', 'smart', 'smartwatch'}
+            if search_tokens_lower and len(search_tokens_lower) > 0:
+                brands = ['samsung', 'apple', 'iphone', 'oneplus', 'xiaomi', 'redmi', 'realme', 'oppo', 'vivo', 'pixel', 'galaxy', 'noise', 'titan', 'boat']
+                has_brand = any(brand in product_name.lower() for brand in brands)
+                if has_brand:
+                    brand_match = any(term in name_lower for term in search_tokens_lower)
+                    if not brand_match:
+                        print(f"    Skipping - doesn't match brand: {name[:60]}")
+                        continue
             
             # Get price - try multiple selectors
             price_text = "0"
@@ -1668,23 +1753,7 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
         if len(local_results) < target_count:
             print(f"⚠️  Only {len(local_results)} cached, need {target_count}. Scraping more...\n")
         else:
-            print(f"\n🌐 Step 4: Enriching cached results with fresh web data...")
-            print("-"*70)
-            
-            pipeline = build_generic_rag()
-            
-            for idx, product in enumerate(local_results):
-                try:
-                    print(f"  Enriching product {idx+1}/{len(local_results)}: {product.get('name', '')[:50]}...")
-                    enriched = pipeline._web_enrichment(product_name, product.get('name', product_name))
-                    if enriched:
-                        product.update(enriched)
-                except Exception as e:
-                    print(f"  Warning: Enrichment failed: {e}")
-            
-            rag_storage.save_storage()
-            print(f"✓ Enriched {len(local_results)} products with fresh data")
-            
+            print(f"✓ Using {len(local_results)} cached products")
             result_df = pd.DataFrame(local_results).sort_values(by="price_numeric")
             return result_df
     
@@ -1709,23 +1778,7 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
         if len(fuzzy_results) < target_count:
             print(f"⚠️  Only {len(fuzzy_results)} cached, need {target_count}. Scraping more...\n")
         else:
-            print(f"\n🌐 Step 4: Enriching fuzzy matches with fresh web data...")
-            print("-"*70)
-            
-            pipeline = build_generic_rag()
-            
-            for idx, product in enumerate(fuzzy_results):
-                try:
-                    print(f"  Enriching product {idx+1}/{len(fuzzy_results)}: {product.get('name', '')[:50]}...")
-                    enriched = pipeline._web_enrichment(product_name, product.get('name', product_name))
-                    if enriched:
-                        product.update(enriched)
-                except Exception as e:
-                    print(f"  Warning: Enrichment failed: {e}")
-            
-            rag_storage.save_storage()
-            print(f"✓ Enriched {len(fuzzy_results)} products with fresh data")
-            
+            print(f"✓ Using {len(fuzzy_results)} cached products")
             result_df = pd.DataFrame(fuzzy_results).sort_values(by="price_numeric")
             return result_df
     
@@ -1806,23 +1859,8 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
         print("\n❌ No products found after filtering.")
         return None
     
-    # Step 5: Use LLM to structure unstructured web data
-    print(f"\n🤖 Step 5: Using LLM to structure and enrich product data...")
-    print("-"*70)
-    
-    pipeline = build_generic_rag()
-    
-    for idx, product in enumerate(all_products):
-        try:
-            print(f"  Structuring product {idx+1}/{len(all_products)}: {product.get('name', '')[:50]}...")
-            # Use LLM to extract and structure additional information
-            enriched = pipeline._web_enrichment(product_name, product.get('name', product_name))
-            if enriched:
-                product.update(enriched)
-        except Exception as e:
-            print(f"  Warning: LLM enrichment failed for product {idx+1}: {e}")
-    
-    print(f"✓ Structured and enriched {len(all_products)} products with LLM")
+    # Products already have complete data from scraping
+    print(f"\n✓ Scraped {len(all_products)} products with complete details")
 
     print(f"\n{'='*70}")
     print("Storing Products in RAG Database (growing knowledge base)...")
