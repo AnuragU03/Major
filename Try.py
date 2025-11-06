@@ -217,6 +217,7 @@ class ProductRAGStorage:
         df.to_csv(filename, index=False, encoding='utf-8-sig')
         print(f"✓ Exported {len(self.products)} products to {filename}")
     
+    
     def clear_storage(self):
         """Clear all stored products"""
         self.products = []
@@ -832,6 +833,7 @@ def scrape_detailed_amazon(driver, product_name, max_products=5):
             print(f"    Closed tab, back to search results")
             time.sleep(1)
             
+            cat, subcat = categorize_product(name)
             product_data = {
                 "name": name,
                 "price": price_text,
@@ -839,7 +841,8 @@ def scrape_detailed_amazon(driver, product_name, max_products=5):
                 "rating": rating,
                 "reviews": reviews,
                 "image_url": image_url,
-                "category": categorize_product(name),
+                "category": cat,
+                "subcategory": subcat,
                 "source": "Amazon.in",
                 "product_link": product_link,
                 "availability": "In Stock"
@@ -1110,6 +1113,7 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
             print(f"    Closed tab, back to search results")
             time.sleep(1)
             
+            cat, subcat = categorize_product(name)
             product_data = {
                 "name": name,
                 "price": price_text,
@@ -1117,7 +1121,8 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
                 "rating": rating,
                 "reviews": reviews,
                 "image_url": image_url,
-                "category": categorize_product(name),
+                "category": cat,
+                "subcategory": subcat,
                 "source": "Flipkart",
                 "product_link": product_link,
                 "availability": "In Stock"
@@ -1149,25 +1154,53 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
     return products
 
 def categorize_product(name, subcategory=""):
+    """Categorize product based on name with detailed hierarchy"""
     name_lower = (name + " " + subcategory).lower()
     
-    shoe_keywords = ['shoe', 'sneaker', 'boot', 'sandal', 'slipper', 'footwear']
-    clothing_keywords = ['shirt', 't-shirt', 'pant', 'jean', 'jacket', 'hoodie', 'dress', 'skirt', 'shorts']
-    electronics_keywords = ['phone', 'mobile', 'smartphone', 'laptop', 'tablet', 'headphone', 'earphone', 'watch', 'camera']
+    categories = {
+        'Mobiles, Computers': {
+            'keywords': ['phone', 'mobile', 'smartphone', 'iphone', 'galaxy', 'oneplus', 'redmi', 'realme', 'oppo', 'vivo', 'pixel'],
+            'subcategories': ['Mi', 'Realme', 'Samsung', 'Apple', 'Vivo', 'OPPO', 'Poco', 'Motorola']
+        },
+        'Mobile Accessories': {
+            'keywords': ['case', 'cover', 'charger', 'cable', 'power bank', 'screenguard', 'tempered glass'],
+            'subcategories': ['Mobile Cases', 'Chargers', 'Power Banks', 'Screenguards']
+        },
+        'Smart Wearable Tech': {
+            'keywords': ['smart watch', 'smartwatch', 'fitness band', 'smart band'],
+            'subcategories': ['Smart Watches', 'Fitness Bands']
+        },
+        'Laptops': {
+            'keywords': ['laptop', 'notebook', 'macbook'],
+            'subcategories': ['Gaming Laptops', 'Business Laptops']
+        },
+        'Tablets': {
+            'keywords': ['tablet', 'ipad'],
+            'subcategories': ['Apple iPads', 'Android Tablets']
+        },
+        'Camera': {
+            'keywords': ['camera', 'dslr', 'lens'],
+            'subcategories': ['DSLR', 'Mirrorless', 'Lenses']
+        },
+        'TV, Appliances': {
+            'keywords': ['tv', 'television', 'speaker', 'soundbar'],
+            'subcategories': ['Televisions', 'Speakers', 'Soundbars']
+        },
+        'Fashion': {
+            'keywords': ['shirt', 'jeans', 'dress', 'shoes'],
+            'subcategories': ['Clothing', 'Footwear']
+        }
+    }
     
-    for keyword in electronics_keywords:
-        if keyword in name_lower:
-            return "Electronics"
+    for category, data in categories.items():
+        for keyword in data['keywords']:
+            if keyword in name_lower:
+                for subcat in data['subcategories']:
+                    if subcat.lower() in name_lower:
+                        return category, subcat
+                return category, 'General'
     
-    for keyword in shoe_keywords:
-        if keyword in name_lower:
-            return "Shoes"
-    
-    for keyword in clothing_keywords:
-        if keyword in name_lower:
-            return "Clothing"
-    
-    return "Other"
+    return 'Other', 'Uncategorized'
 
 
 def clean_price(price_text):
