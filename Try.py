@@ -1650,71 +1650,84 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
     print(f"\n📊 Step 1: Searching local database (exact match)...")
     print("-"*70)
     
+    # Extract key search terms from query (remove generic words)
+    generic_terms = {'mobile', 'phone', 'smartphone', 'the', 'a', 'an', 'best', 'new', 'latest', 'buy'}
+    search_tokens = set(product_name.lower().split()) - generic_terms
+    
     local_results = []
-    q = product_name.lower()
     for item in rag_storage.products:
-        if q in str(item.get('name', '')).lower() or q in str(item.get('category', '')).lower():
+        item_name = str(item.get('name', '')).lower()
+        # Check if ALL key search terms are present in product name
+        if search_tokens and all(term in item_name for term in search_tokens):
             local_results.append(item)
     
     if local_results:
         print(f"✓ Found {len(local_results)} exact matches in local database!")
-        result_df = pd.DataFrame(local_results)
         
-        # Step 4: Always enrich with fresh data
-        print(f"\n🌐 Step 4: Enriching cached results with fresh web data...")
-        print("-"*70)
-        
-        # Build generic RAG pipeline for enrichment
-        pipeline = build_generic_rag()
-        
-        # Enrich each product with fresh web data via RAG pipeline
-        for idx, product in enumerate(local_results):
-            try:
-                print(f"  Enriching product {idx+1}/{len(local_results)}: {product.get('name', '')[:50]}...")
-                enriched = pipeline._web_enrichment(product_name, product.get('name', product_name))
-                if enriched:
-                    product.update(enriched)
-            except Exception as e:
-                print(f"  Warning: Enrichment failed for product {idx+1}: {e}")
-        
-        # Update storage with enriched data
-        rag_storage.save_storage()
-        print(f"✓ Enriched {len(local_results)} products with fresh data")
-        
-        result_df = pd.DataFrame(local_results).sort_values(by="price_numeric")
-        return result_df
+        target_count = max_products * 2
+        if len(local_results) < target_count:
+            print(f"⚠️  Only {len(local_results)} cached, need {target_count}. Scraping more...\n")
+        else:
+            print(f"\n🌐 Step 4: Enriching cached results with fresh web data...")
+            print("-"*70)
+            
+            pipeline = build_generic_rag()
+            
+            for idx, product in enumerate(local_results):
+                try:
+                    print(f"  Enriching product {idx+1}/{len(local_results)}: {product.get('name', '')[:50]}...")
+                    enriched = pipeline._web_enrichment(product_name, product.get('name', product_name))
+                    if enriched:
+                        product.update(enriched)
+                except Exception as e:
+                    print(f"  Warning: Enrichment failed: {e}")
+            
+            rag_storage.save_storage()
+            print(f"✓ Enriched {len(local_results)} products with fresh data")
+            
+            result_df = pd.DataFrame(local_results).sort_values(by="price_numeric")
+            return result_df
     
-    # Step 2: Fuzzy match if needed
+    # Step 2: Fuzzy match if needed (with stricter matching)
     print(f"❌ No exact matches found")
     print(f"\n🔍 Step 2: Fuzzy matching in local database...")
     print("-"*70)
     
-    fuzzy_results = rag_storage.semantic_search(product_name, top_k=20)
+    fuzzy_results = []
+    for item in rag_storage.products:
+        item_name = str(item.get('name', '')).lower()
+        # At least 60% of key terms must match for fuzzy search
+        if search_tokens:
+            match_count = sum(1 for term in search_tokens if term in item_name)
+            if match_count >= len(search_tokens) * 0.6:
+                fuzzy_results.append(item)
     
     if fuzzy_results:
         print(f"✓ Found {len(fuzzy_results)} fuzzy matches!")
         
-        # Step 4: Always enrich with fresh data
-        print(f"\n🌐 Step 4: Enriching fuzzy matches with fresh web data...")
-        print("-"*70)
-        
-        pipeline = build_generic_rag()
-        
-        for idx, product in enumerate(fuzzy_results):
-            try:
-                print(f"  Enriching product {idx+1}/{len(fuzzy_results)}: {product.get('name', '')[:50]}...")
-                enriched = pipeline._web_enrichment(product_name, product.get('name', product_name))
-                if enriched:
-                    product.update(enriched)
-            except Exception as e:
-                print(f"  Warning: Enrichment failed for product {idx+1}: {e}")
-        
-        # Update storage
-        rag_storage.save_storage()
-        print(f"✓ Enriched {len(fuzzy_results)} products with fresh data")
-        
-        result_df = pd.DataFrame(fuzzy_results).sort_values(by="price_numeric")
-        return result_df
+        target_count = max_products * 2
+        if len(fuzzy_results) < target_count:
+            print(f"⚠️  Only {len(fuzzy_results)} cached, need {target_count}. Scraping more...\n")
+        else:
+            print(f"\n🌐 Step 4: Enriching fuzzy matches with fresh web data...")
+            print("-"*70)
+            
+            pipeline = build_generic_rag()
+            
+            for idx, product in enumerate(fuzzy_results):
+                try:
+                    print(f"  Enriching product {idx+1}/{len(fuzzy_results)}: {product.get('name', '')[:50]}...")
+                    enriched = pipeline._web_enrichment(product_name, product.get('name', product_name))
+                    if enriched:
+                        product.update(enriched)
+                except Exception as e:
+                    print(f"  Warning: Enrichment failed: {e}")
+            
+            rag_storage.save_storage()
+            print(f"✓ Enriched {len(fuzzy_results)} products with fresh data")
+            
+            result_df = pd.DataFrame(fuzzy_results).sort_values(by="price_numeric")
+            return result_df
     
     # Step 3: Fetch externally as last resort (always grows knowledge base)
     print(f"❌ No fuzzy matches found")
@@ -1737,7 +1750,48 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
 
     all_products = amazon_products + flipkart_products
     
-    # Only apply phone filter if user is specifically searching for phones
+    # Filter 1: Validate products match search query
+    print(f"\n🔍 Validating scraped products match search query...")
+    validated_products = []
+    for p in all_products:
+        p_name = str(p.get('name', '')).lower()
+        if search_tokens:
+            match_count = sum(1 for term in search_tokens if term in p_name)
+            if match_count >= len(search_tokens) * 0.6:
+                validated_products.append(p)
+        else:
+            validated_products.append(p)
+    
+    removed = len(all_products) - len(validated_products)
+    if removed > 0:
+        print(f"✓ Removed {removed} irrelevant products, kept {len(validated_products)} matching")
+    
+    # If too many removed, scrape more to reach target
+    target_count = max_products * 2
+    if removed > 0 and len(validated_products) < target_count:
+        shortage = target_count - len(validated_products)
+        print(f"⚠️  Need {shortage} more products. Re-scraping...")
+        
+        driver = setup_driver()
+        try:
+            extra_amazon = scrape_detailed_amazon(driver, product_name, shortage)
+            extra_flipkart = scrape_detailed_flipkart(driver, product_name, shortage)
+        finally:
+            driver.quit()
+        
+        extra_products = extra_amazon + extra_flipkart
+        for p in extra_products:
+            p_name = str(p.get('name', '')).lower()
+            if search_tokens:
+                match_count = sum(1 for term in search_tokens if term in p_name)
+                if match_count >= len(search_tokens) * 0.6:
+                    validated_products.append(p)
+        
+        print(f"✓ Added {len(validated_products) - (len(all_products) - removed)} more products")
+    
+    all_products = validated_products
+    
+    # Filter 2: Apply phone filter if searching for phones
     phone_search_terms = ['phone', 'mobile', 'smartphone', 'iphone', 'galaxy', 'pixel', 'oneplus', 'redmi']
     is_phone_search = any(term in product_name.lower() for term in phone_search_terms)
     
@@ -1746,9 +1800,7 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
         all_products = filter_only_phones(all_products, product_name)
         after_count = len(all_products)
         if before_count != after_count:
-            print(f"\n📱 Phone Filter: Removed {before_count - after_count} accessories, kept {after_count} phone products")
-    else:
-        print(f"\n✓ No phone filter applied - keeping all {len(all_products)} products")
+            print(f"📱 Phone Filter: Removed {before_count - after_count} accessories, kept {after_count} phone products")
 
     if not all_products:
         print("\n❌ No products found after filtering.")
