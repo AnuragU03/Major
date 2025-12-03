@@ -4,6 +4,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.webdriver.chrome.options import Options
 import pandas as pd
 import time
 import random
@@ -224,6 +225,23 @@ class ProductRAGStorage:
         self.vectors = None
         self.save_storage()
 
+    def delete_product(self, product_id):
+        """Delete a product by its ID."""
+        initial_count = len(self.products)
+        self.products = [p for p in self.products if p.get('id') != product_id]
+        if len(self.products) < initial_count:
+            self._update_vectors()
+            self.save_storage()
+            return True
+        return False
+
+    def get_product_by_id(self, product_id):
+        """Get a single product by its ID."""
+        for p in self.products:
+            if p.get('id') == product_id:
+                return p
+        return None
+
 # ===========================
 # Enhanced Web Scraping
 # ===========================
@@ -233,36 +251,112 @@ user_agents = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
 ]
 
+class Browser:
+    """A wrapper for the Selenium browser driver."""
+    def __init__(self):
+        self._driver = None
+
+    def start(self):
+        """Starts the browser driver."""
+        options = Options()
+        options.add_argument(f'user-agent={random.choice(user_agents)}')
+        options.add_argument("--disable-blink-features=AutomationControlled")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--start-maximized")
+        options.add_argument("--disable-extensions")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("log-level=3")
+        options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
+        options.add_experimental_option('useAutomationExtension', False)
+        options.add_experimental_option(
+            "prefs", {"profile.default_content_setting_values.notifications": 2}
+        )
+        
+        service = Service(ChromeDriverManager().install())
+        self._driver = webdriver.Chrome(service=service, options=options)
+        
+        # Avoid basic bot detection
+        try:
+            self._driver.execute_cdp_cmd(
+                "Network.setUserAgentOverride",
+                {"userAgent": random.choice(user_agents)},
+            )
+        except Exception:
+            pass
+        
+        try:
+            self._driver.execute_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
+        except Exception:
+            pass
+        
+        self._driver.set_page_load_timeout(60)
+
+    def __getattr__(self, name):
+        """Delegate attribute access to the underlying driver."""
+        if self._driver is not None:
+            return getattr(self._driver, name)
+        raise AttributeError(f"'Browser' object has no attribute '{name}' before 'start()' is called.")
+
+    def quit(self):
+        """Quits the browser driver."""
+        if self._driver:
+            self._driver.quit()
+
+def get_browser():
+    """Returns a Browser instance."""
+    return Browser()
+
+
 def setup_driver():
-    chrome_options = webdriver.ChromeOptions()
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument(f"user-agent={random.choice(user_agents)}")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--start-maximized")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    chrome_options.add_experimental_option("prefs", {"profile.default_content_setting_values.notifications": 2})
+    """Create browser via adapter (Selenium-only)."""
+    browser = get_browser()
+    browser.start()
+    return browser
 
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=chrome_options
-    )
 
+def build_amazon_search_url(product_name):
+    """Build Amazon search URL from product name."""
+    return f"https://www.amazon.in/s?k={product_name.replace(' ', '+')}"
+
+
+def handle_amazon_interstitial(driver):
+    """Handle Amazon interstitial/503 pages. Returns True if blocked."""
     try:
-        driver.execute_cdp_cmd('Network.setUserAgentOverride', {"userAgent": random.choice(user_agents)})
+        page_text = driver.page_source.lower()
+        if '503' in page_text or 'service unavailable' in page_text or 'robot' in page_text:
+            print("Amazon: Detected interstitial/503 page")
+            time.sleep(3)
+            return True
+        return False
     except Exception:
-        pass
-    try:
-        driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-    except Exception:
-        pass
-    driver.set_page_load_timeout(30)
+        return False
 
-    return driver
+
+def handle_flipkart_interstitial(driver):
+    """Handle Flipkart interstitial/popup pages. Returns True if blocked."""
+    try:
+        # Close login popup if present
+        try:
+            close_btn = WebDriverWait(driver, 3).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), '✕')]"))
+            )
+            close_btn.click()
+            time.sleep(1)
+        except:
+            pass
+        
+        page_text = driver.page_source.lower()
+        if '503' in page_text or 'service unavailable' in page_text:
+            print("Flipkart: Detected interstitial/503 page")
+            time.sleep(3)
+            return True
+        return False
+    except Exception:
+        return False
 
 
 def scrape_amazon_product_details(driver, product_url):
@@ -417,10 +511,31 @@ def scrape_flipkart_product_details(driver, product_url):
             'technical_details': {},
             'additional_info': {},
             'description': '',
-            'features': []
+            'features': [],
+            'page_price': ''  # Price from product page
         }
         
         print(f"      Searching for Flipkart product details...")
+        
+        # Try to get price from product page (useful when search page doesn't show price)
+        price_selectors = [
+            "div.Nx9bqj._4b5DiR",  # Main price on product page
+            "div._30jeq3._16Jk6d",  # Alternative price
+            "div.Nx9bqj",
+            "div._30jeq3",
+            "div._16Jk6d"
+        ]
+        
+        for sel in price_selectors:
+            try:
+                price_elem = driver.find_element(By.CSS_SELECTOR, sel)
+                price_text = price_elem.text.strip()
+                if price_text and '₹' in price_text:
+                    details['page_price'] = price_text
+                    print(f"      Found price on product page: {price_text}")
+                    break
+            except:
+                continue
         
         # Keywords to search for in Flipkart pages
         spec_keywords = ['specification', 'specifications', 'specs']
@@ -941,6 +1056,15 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
         try:
             print(f"  Scraping Flipkart product {processed_count + 1}/{max_products}...")
             
+            # Check if product is sold out or unavailable - skip early
+            try:
+                item_text_lower = item.text.lower()
+                if any(skip_text in item_text_lower for skip_text in ['sold out', 'currently unavailable', 'out of stock', 'coming soon']):
+                    print(f"    Skipping - product is sold out/unavailable")
+                    continue
+            except:
+                pass
+            
             # Get product link and name from link element
             product_link = ""
             name = ""
@@ -964,11 +1088,34 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
                         if '?' in href:
                             href = href.split('?')[0]
                         product_link = href if href.startswith('http') else f"https://www.flipkart.com{href}"
-                        # Try to get name from link title attribute first
-                        name = link_elem.get_attribute("title") or link_elem.get_attribute("aria-label") or link_elem.text.strip()
+                        # Try to get name from link title attribute first (most reliable)
+                        name = link_elem.get_attribute("title") or link_elem.get_attribute("aria-label") or ""
+                        
+                        # If no title/aria-label, try text but clean it
+                        if not name or len(name) < 10:
+                            raw_text = link_elem.text.strip()
+                            # Split by newlines and find the actual product name
+                            lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
+                            for line in lines:
+                                # Skip junk lines
+                                if "Currently unavailable" in line:
+                                    continue
+                                if "Add to Compare" in line:
+                                    continue
+                                if "₹" in line:
+                                    continue
+                                if "%" in line:
+                                    continue
+                                if "OFF" in line.upper():
+                                    continue
+                                if len(line) < 15:
+                                    continue
+                                name = line
+                                break
+                        
                         if product_link:
                             print(f"    Found link: {product_link[:60]}...")
-                        if name and len(name) > 5:
+                        if name and len(name) > 10:
                             print(f"    Found name from link: {name[:60]}")
                             break
                 except:
@@ -984,23 +1131,45 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
             # If name not found or is generic, try other selectors
             generic_names = ['bestseller', 'coming soon', 'new arrival', 'hot deal', 'sale']
             if not name or len(name) < 5 or any(gen in name.lower() for gen in generic_names):
-                # Try to get all text from the item and extract product name
+                # First try to get title from anchor tag with title attribute (most reliable)
                 try:
-                    item_text = item.text
-                    lines = [line.strip() for line in item_text.split('\n') if line.strip()]
-                    for line in lines:
-                        # Skip lines that are clearly not product names
-                        if (len(line) > 15 and 
-                            not line.startswith('₹') and 
-                            not any(gen in line.lower() for gen in generic_names) and
-                            not line.replace(',', '').replace('(', '').replace(')', '').isdigit() and
-                            'rating' not in line.lower() and
-                            '%' not in line):
+                    title_el = item.find_element(By.CSS_SELECTOR, "a[title]")
+                    name = title_el.get_attribute("title") or ""
+                    if name and len(name) > 15:
+                        print(f"    Found name from a[title]: {name[:60]}")
+                except:
+                    pass
+                
+                # Try to get all text from the item and extract product name
+                if not name or len(name) < 15:
+                    try:
+                        item_text = item.text
+                        lines = [line.strip() for line in item_text.split('\n') if line.strip()]
+                        for line in lines:
+                            # Skip lines that are clearly not product names
+                            if "₹" in line:
+                                continue
+                            if "%" in line:
+                                continue
+                            if "OFF" in line.upper():
+                                continue
+                            if "Add to Compare" in line:
+                                continue
+                            if "Currently unavailable" in line:
+                                continue
+                            if len(line) < 15:
+                                continue
+                            if any(gen in line.lower() for gen in generic_names):
+                                continue
+                            if line.replace(',', '').replace('(', '').replace(')', '').isdigit():
+                                continue
+                            if 'rating' in line.lower():
+                                continue
                             name = line
                             print(f"    Found name from item text: {name[:60]}")
                             break
-                except:
-                    pass
+                    except:
+                        pass
                 
                 # If still not found, try specific selectors
                 if not name or len(name) < 10:
@@ -1022,11 +1191,20 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
                             name = name_elem.text.strip()
                             name = re.sub(r'^\d+\.\s*', '', name)
                             if name and len(name) > 10 and not name.startswith('₹') and not any(gen in name.lower() for gen in generic_names):
+                                # Skip junk names
+                                if "Add to Compare" in name or "Currently unavailable" in name:
+                                    name = ""
+                                    continue
                                 print(f"    Found name with selector '{sel}': {name[:60]}")
                                 break
                         except:
                             continue
             
+            # Final validation - skip junk names
+            if name and (name.lower() in ["add to compare", "currently unavailable", "out of stock"]):
+                print(f"    Skipping junk name: {name}")
+                continue
+                
             if not name or len(name) < 10 or any(gen in name.lower() for gen in generic_names):
                 print(f"    Failed to extract valid name, skipping...")
                 continue
@@ -1071,6 +1249,17 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
                 except:
                     continue
             
+            # Fallback: extract price from item text using regex
+            if not price_text or price_text == "0" or '₹' not in price_text:
+                try:
+                    item_text = item.text
+                    price_match = re.search(r'₹\s*[\d,]+', item_text)
+                    if price_match:
+                        price_text = price_match.group(0)
+                        print(f"    Found price from text: {price_text}")
+                except:
+                    pass
+            
             # Get image
             image_url = ""
             try:
@@ -1113,6 +1302,13 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
             print(f"    Closed tab, back to search results")
             time.sleep(1)
             
+            # If price wasn't found from search results, use price from product page
+            if (not price_text or price_text == "0" or '₹' not in price_text) and detailed_info:
+                page_price = detailed_info.get('page_price', '')
+                if page_price and '₹' in page_price:
+                    price_text = page_price
+                    print(f"    Using price from product page: {price_text}")
+            
             cat, subcat = categorize_product(name)
             product_data = {
                 "name": name,
@@ -1151,6 +1347,71 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
             continue
     
     print(f"Flipkart: Successfully scraped {len(products)} products with details")
+    return products
+
+def scrape_detailed_amazon_resilient(driver, product_name, max_products=5):
+    """Wrapper around scrape_detailed_amazon to handle Amazon interstitial/503 gracefully."""
+    # Visit homepage to clear interstitial if present
+    try:
+        driver.get("https://www.amazon.in")
+        time.sleep(3)
+        _ = handle_amazon_interstitial(driver)
+    except Exception:
+        pass
+
+    # First attempt
+    try:
+        products = scrape_detailed_amazon(driver, product_name, max_products=max_products)
+    except Exception:
+        products = []
+
+    # Soft retry: go directly to search URL and refresh once if 503 detected
+    if not products:
+        try:
+            search_url = build_amazon_search_url(product_name)
+            driver.get(search_url)
+            time.sleep(4)
+            blocked = handle_amazon_interstitial(driver)
+            if blocked:
+                print("Amazon 503/interstitial detected; refreshing search once...")
+                driver.get(search_url)
+                time.sleep(4)
+            products = scrape_detailed_amazon(driver, product_name, max_products=max_products)
+        except Exception:
+            pass
+
+    return products
+def scrape_detailed_flipkart_resilient(driver, product_name, max_products=5):
+    """Wrapper around scrape_detailed_flipkart to handle Flipkart interstitial/503 gracefully."""
+    # Visit homepage to clear interstitial if present
+    try:
+        driver.get("https://www.flipkart.com")
+        time.sleep(3)
+        _ = handle_flipkart_interstitial(driver)
+    except Exception:
+        pass
+
+    # First attempt
+    try:
+        products = scrape_detailed_flipkart(driver, product_name, max_products=max_products)
+    except Exception:
+        products = []
+
+    # Soft retry: go directly to search URL and refresh once if 503 detected
+    if not products:
+        try:
+            search_url = f"https://www.flipkart.com/search?q={product_name.replace(' ', '+')}"
+            driver.get(search_url)
+            time.sleep(4)
+            blocked = handle_flipkart_interstitial(driver)
+            if blocked:
+                print("Flipkart 503/interstitial detected; refreshing search once...")
+                driver.get(search_url)
+                time.sleep(4)
+            products = scrape_detailed_flipkart(driver, product_name, max_products=max_products)
+        except Exception:
+            pass
+
     return products
 
 def categorize_product(name, subcategory=""):
@@ -1669,11 +1930,11 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
     try:
         print("Scraping Amazon with Full Product Details...")
         print("-"*70)
-        amazon_products = scrape_detailed_amazon(driver, product_name, max_products)
+        amazon_products = scrape_detailed_amazon_resilient(driver, product_name, max_products)
         
         print("\nScraping Flipkart with Full Product Details...")
         print("-"*70)
-        flipkart_products = scrape_detailed_flipkart(driver, product_name, max_products)
+        flipkart_products = scrape_detailed_flipkart_resilient(driver, product_name, max_products)
         
     finally:
         driver.quit()
@@ -1704,8 +1965,8 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
         
         driver = setup_driver()
         try:
-            extra_amazon = scrape_detailed_amazon(driver, product_name, shortage)
-            extra_flipkart = scrape_detailed_flipkart(driver, product_name, shortage)
+            extra_amazon = scrape_detailed_amazon_resilient(driver, product_name, shortage)
+            extra_flipkart = scrape_detailed_flipkart_resilient(driver, product_name, shortage)
         finally:
             driver.quit()
         
@@ -1795,14 +2056,19 @@ if __name__ == "__main__":
     print("\n" + "="*70)
     print("🛍️  E-COMMERCE PRICE COMPARISON WITH RAG".center(70))
     print("="*70)
-    print("\n📋 Main Menu:")
-    print("1. 🔍 Search Products (Unified RAG: Local → Fuzzy → Web Scraping)")
-    print("2. 📊 View Database Statistics")
-    print("3. 🗑️  Clear Database")
-    print("4. 🚪 Exit")
     
     while True:
-        choice = input("\nEnter choice (1-4): ").strip()
+        print("\n📋 Main Menu:")
+        print("1. 🔍 Search Products (Unified RAG: Local → Fuzzy → Web Scraping)")
+        print("2. 📊 View Database Statistics")
+        print("3. 🗑️  Clear Database")
+        print("4. 💾 Export Database to CSV")
+        print("5. 💡 Semantic Search in DB")
+        print("6. 📜 List All Products")
+        print("7. ❌ Delete a Product by ID")
+        print("8. ℹ️  View Product Details by ID")
+        print("9. 🚪 Exit")
+        choice = input("\nEnter choice (1-9): ").strip()
         
         if choice == "1":
             # Unified RAG search
@@ -1831,10 +2097,69 @@ if __name__ == "__main__":
                 print("✓ Database cleared successfully.")
         
         elif choice == "4":
+            filename = input("📁 Enter CSV filename (default: products_export.csv): ").strip()
+            filename = filename or "products_export.csv"
+            rag_storage.export_to_csv(filename)
+            
+        elif choice == "5":
+            # Semantic Search in DB
+            query = input("\n💡 Enter search query for semantic search: ").strip()
+            if query:
+                results = rag_storage.semantic_search(query)
+                if results:
+                    print(f"\nFound {len(results)} semantic matches:")
+                    for p in results:
+                        print(f"  - [Score: {p['similarity_score']:.2f}] {p['name']} (ID: {p['id']})")
+                else:
+                    print("No semantic matches found in the database.")
+
+        elif choice == "6":
+            # List All Products
+            if rag_storage.products:
+                print("\n📜 All products in database:")
+                for p in rag_storage.products:
+                    print(f"  - ID: {p['id']}, Name: {p['name']}")
+            else:
+                print("Database is empty.")
+
+        elif choice == "7":
+            # Delete a Product
+            product_id = input("\n❌ Enter the ID of the product to delete: ").strip()
+            if product_id:
+                if rag_storage.delete_product(product_id):
+                    print(f"✓ Product with ID '{product_id}' deleted.")
+                else:
+                    print(f"✗ Product with ID '{product_id}' not found.")
+
+        elif choice == "8":
+            # View Product Details
+            product_id = input("\nℹ️  Enter the ID of the product to view: ").strip()
+            if product_id:
+                product = rag_storage.get_product_by_id(product_id)
+                if product:
+                    print("\n" + "="*70)
+                    print(f"DETAILS FOR PRODUCT: {product.get('id')}".center(70))
+                    print("="*70)
+                    for key, value in product.items():
+                        if isinstance(value, dict) and value:
+                            print(f"\n{key.replace('_', ' ').title()}:")
+                            for k, v in value.items():
+                                print(f"  - {k}: {v}")
+                        elif isinstance(value, list) and value:
+                            print(f"\n{key.replace('_', ' ').title()}:")
+                            for item in value:
+                                print(f"  - {item}")
+                        else:
+                            print(f"{key.replace('_', ' ').title()}: {value}")
+                    print("="*70)
+                else:
+                    print(f"✗ Product with ID '{product_id}' not found.")
+            
+        elif choice == "9":
             # Exit
             print("\n👋 Exiting... Goodbye!")
             break
         
         else:
-            print("❌ Invalid choice. Please enter 1-4.")
+            print("❌ Invalid choice. Please enter 1-9.")
 
