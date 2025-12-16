@@ -125,11 +125,109 @@ def scrape_amazon_product_details(driver, product_url):
             'technical_details': {},
             'additional_info': {},
             'description': '',
-            'features': []
+            'features': [],
+            'customer_reviews': [],
+            'review_summary': '',
+            'rating_breakdown': {}
         }
         
         print(f"      Searching for Amazon product details...")
         
+        # ========== CUSTOMER REVIEWS EXTRACTION ==========
+        print(f"      Extracting customer reviews...")
+        
+        # Get rating breakdown (5 star: 61%, 4 star: 22%, etc.)
+        try:
+            rating_table = driver.find_element(By.ID, "histogramTable")
+            rating_rows = rating_table.find_elements(By.CSS_SELECTOR, "tr.a-histogram-row")
+            for row in rating_rows:
+                try:
+                    star_text = row.find_element(By.CSS_SELECTOR, "td.aok-nowrap span").text.strip()
+                    percent_text = row.find_element(By.CSS_SELECTOR, "td.a-text-right span").text.strip()
+                    if star_text and percent_text:
+                        details['rating_breakdown'][star_text] = percent_text
+                except:
+                    continue
+            print(f"      Found rating breakdown: {details['rating_breakdown']}")
+        except:
+            # Alternative method
+            try:
+                histogram = driver.find_elements(By.CSS_SELECTOR, "#averageCustomerReviews .a-histogram-row, [data-hook='rating-histogram'] tr")
+                for row in histogram:
+                    text = row.text.strip()
+                    if 'star' in text.lower() and '%' in text:
+                        parts = text.split()
+                        for i, p in enumerate(parts):
+                            if 'star' in p.lower() and i > 0:
+                                star = parts[i-1] + ' star'
+                                for pct in parts:
+                                    if '%' in pct:
+                                        details['rating_breakdown'][star] = pct
+                                        break
+            except:
+                pass
+        
+        # Get "Customers say" summary
+        try:
+            customers_say = driver.find_element(By.CSS_SELECTOR, "[data-hook='cr-summarization-attributes-list'], #cr-summarization-attributes-list")
+            details['review_summary'] = customers_say.text.strip()
+            print(f"      Found 'Customers say' summary")
+        except:
+            try:
+                # Alternative: Look for insights section
+                insights = driver.find_element(By.CSS_SELECTOR, ".cr-widget-FocalReviews, [data-hook='lighthut-terms-list']")
+                details['review_summary'] = insights.text.strip()
+            except:
+                pass
+        
+        # Get top customer reviews
+        try:
+            review_elements = driver.find_elements(By.CSS_SELECTOR, "[data-hook='review'], .review, .a-section.review")[:5]
+            for review in review_elements:
+                try:
+                    review_data = {}
+                    
+                    # Review title
+                    try:
+                        title = review.find_element(By.CSS_SELECTOR, "[data-hook='review-title'], .review-title").text.strip()
+                        review_data['title'] = title
+                    except:
+                        pass
+                    
+                    # Review text
+                    try:
+                        body = review.find_element(By.CSS_SELECTOR, "[data-hook='review-body'], .review-text, .review-text-content").text.strip()
+                        review_data['text'] = body
+                    except:
+                        pass
+                    
+                    # Review rating
+                    try:
+                        rating = review.find_element(By.CSS_SELECTOR, "[data-hook='review-star-rating'], .review-rating").text.strip()
+                        review_data['rating'] = rating
+                    except:
+                        pass
+                    
+                    if review_data.get('text'):
+                        details['customer_reviews'].append(review_data)
+                except:
+                    continue
+            print(f"      Found {len(details['customer_reviews'])} customer reviews")
+        except:
+            pass
+        
+        # Alternative: Get reviews from review section
+        if not details['customer_reviews']:
+            try:
+                review_texts = driver.find_elements(By.CSS_SELECTOR, ".reviewText, [data-hook='review-body'] span")[:5]
+                for rt in review_texts:
+                    text = rt.text.strip()
+                    if text and len(text) > 20:
+                        details['customer_reviews'].append({'text': text})
+            except:
+                pass
+        
+        # ========== ORIGINAL DETAIL EXTRACTION ==========
         # Keywords to search for in page elements
         detail_keywords = ['detail', 'product information', 'specification', 'technical', 'product details']
         
@@ -287,11 +385,102 @@ def scrape_flipkart_product_details(driver, product_url):
             'additional_info': {},
             'description': '',
             'features': [],
-            'page_price': ''  # Price from product page
+            'page_price': '',  # Price from product page
+            'customer_reviews': [],
+            'review_summary': '',
+            'rating_breakdown': {}
         }
         
         print(f"      Searching for Flipkart product details...")
         
+        # ========== CUSTOMER REVIEWS EXTRACTION ==========
+        print(f"      Extracting Flipkart customer reviews...")
+        
+        # Get rating breakdown
+        try:
+            rating_bars = driver.find_elements(By.CSS_SELECTOR, "._5nfVE5, .BArk-j, ._1uJVNT")
+            for bar in rating_bars:
+                text = bar.text.strip()
+                if 'star' in text.lower() or any(c.isdigit() for c in text):
+                    # Parse "5 ★ 12,345" or similar formats
+                    parts = text.split()
+                    if len(parts) >= 2:
+                        star = parts[0] + ' star'
+                        count = parts[-1] if len(parts) > 1 else ''
+                        if count:
+                            details['rating_breakdown'][star] = count
+        except:
+            pass
+        
+        # Get review highlights/summary
+        try:
+            highlights = driver.find_elements(By.CSS_SELECTOR, "._3LsR7f, ._2o9D_1, .t-ZTKy")
+            summary_parts = []
+            for h in highlights[:5]:
+                text = h.text.strip()
+                if text and len(text) > 5:
+                    summary_parts.append(text)
+            if summary_parts:
+                details['review_summary'] = ' | '.join(summary_parts)
+                print(f"      Found review highlights")
+        except:
+            pass
+        
+        # Get customer reviews
+        try:
+            review_elements = driver.find_elements(By.CSS_SELECTOR, "div.ZmyHeo, div._27M-vq, div.t-ZTKy, div._6K-7Co")[:5]
+            for review in review_elements:
+                try:
+                    review_data = {}
+                    
+                    # Review title
+                    try:
+                        title = review.find_element(By.CSS_SELECTOR, "p._2-N8zT, ._2sc7ZR").text.strip()
+                        review_data['title'] = title
+                    except:
+                        pass
+                    
+                    # Review text
+                    try:
+                        body = review.find_element(By.CSS_SELECTOR, "div.t-ZTKy, div._6K-7Co, div.ZmyHeo").text.strip()
+                        review_data['text'] = body
+                    except:
+                        try:
+                            body = review.text.strip()
+                            if len(body) > 20:
+                                review_data['text'] = body
+                        except:
+                            pass
+                    
+                    # Review rating
+                    try:
+                        rating = review.find_element(By.CSS_SELECTOR, "div._3LWZlK, div._3LWZlK._1BLPMq").text.strip()
+                        review_data['rating'] = rating
+                    except:
+                        pass
+                    
+                    if review_data.get('text') and len(review_data['text']) > 10:
+                        details['customer_reviews'].append(review_data)
+                except:
+                    continue
+            print(f"      Found {len(details['customer_reviews'])} customer reviews")
+        except:
+            pass
+        
+        # Alternative: Look for review text in common containers
+        if not details['customer_reviews']:
+            try:
+                review_containers = driver.find_elements(By.CSS_SELECTOR, "[class*='review'], [class*='Review']")[:10]
+                for container in review_containers:
+                    text = container.text.strip()
+                    if text and len(text) > 30 and len(text) < 1000:
+                        details['customer_reviews'].append({'text': text})
+                        if len(details['customer_reviews']) >= 5:
+                            break
+            except:
+                pass
+        
+        # ========== ORIGINAL EXTRACTION ==========
         # Try to get price from product page (useful when search page doesn't show price)
         price_selectors = [
             "div.Nx9bqj._4b5DiR",  # Main price on product page
@@ -1091,6 +1280,8 @@ def display_results_gui(df: pd.DataFrame):
         info_label = tk.Label(frame, text=info, font=("Arial", 9))
         info_label.grid(row=3, column=1, sticky=tk.W, padx=10)
         
+        next_row = 4
+        
         # View Details button
         product_row = row.to_dict()
         
@@ -1117,6 +1308,35 @@ def display_results_gui(df: pd.DataFrame):
                 details_text += f"💬 Reviews: {product_data['reviews']}\n"
             
             details_text += "\n"
+            
+            # Rating Breakdown (5 star: 61%, etc.)
+            if product_data.get('rating_breakdown'):
+                details_text += "⭐ RATING BREAKDOWN:\n" + "-"*50 + "\n"
+                for star, percent in product_data['rating_breakdown'].items():
+                    details_text += f"  {star}: {percent}\n"
+                details_text += "\n"
+            
+            # Customer Reviews
+            if product_data.get('customer_reviews'):
+                reviews = product_data['customer_reviews']
+                details_text += f"💬 CUSTOMER REVIEWS ({len(reviews)} shown):\n" + "-"*50 + "\n"
+                for idx, review in enumerate(reviews[:5], 1):
+                    if isinstance(review, dict):
+                        if review.get('rating'):
+                            details_text += f"  ⭐ {review['rating']}\n"
+                        if review.get('title'):
+                            details_text += f"  📌 {review['title']}\n"
+                        if review.get('text'):
+                            review_text = review['text'][:300] + "..." if len(review['text']) > 300 else review['text']
+                            details_text += f"  {review_text}\n"
+                    else:
+                        details_text += f"  {str(review)[:300]}\n"
+                    details_text += "\n"
+            
+            # Review Summary (Customers say...)
+            if product_data.get('review_summary'):
+                details_text += "📊 CUSTOMERS SAY:\n" + "-"*50 + "\n"
+                details_text += f"  {product_data['review_summary']}\n\n"
             
             # Technical Details
             if product_data.get('technical_details'):
@@ -1171,14 +1391,14 @@ def display_results_gui(df: pd.DataFrame):
         details_btn = tk.Button(frame, text="📄 View Details", 
                                command=show_details, bg="#3498db", fg="white",
                                font=("Arial", 9, "bold"), cursor="hand2", padx=10, pady=3)
-        details_btn.grid(row=4, column=1, sticky=tk.W, padx=10, pady=5)
+        details_btn.grid(row=5, column=1, sticky=tk.W, padx=10, pady=5)
         
         # Product link - clickable
         if row.get('product_link'):
             link_label = tk.Label(frame, text="🔗 View on Website", 
                                 font=("Arial", 9, "underline"), fg="blue",
                                 cursor="hand2")
-            link_label.grid(row=5, column=1, sticky=tk.W, padx=10, pady=3)
+            link_label.grid(row=6, column=1, sticky=tk.W, padx=10, pady=3)
             link_label.bind("<Button-1>", lambda e, url=row['product_link']: webbrowser.open(url))
 
     canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
