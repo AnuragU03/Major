@@ -1,6 +1,6 @@
-# 🛍️ E-Commerce Price Comparison Tool with RAG
+# 🛍️ E-Commerce Price Comparison Tool with RAG & Neural Sentiment Analysis
 
-An intelligent web scraper that compares product prices across Amazon and Flipkart using Retrieval-Augmented Generation (RAG) for smart caching and semantic search.
+An intelligent web scraper that compares product prices across Amazon and Flipkart using Retrieval-Augmented Generation (RAG) for smart caching, semantic search, and **Neural Network-based Sentiment Analysis** using DistilBERT transformers.
 
 ## 🌟 Features
 
@@ -9,7 +9,15 @@ An intelligent web scraper that compares product prices across Amazon and Flipka
 - **Deep Product Details**: Scrapes technical specifications, ratings, reviews, and descriptions
 - **RAG-Based Caching**: Smart local database with semantic search capabilities
 - **Intelligent Filtering**: Automatically filters accessories and validates product relevance
-- **Interactive GUI**: Rich interface displaying products with images, prices, and detailed specs
+- **Interactive GUI**: Rich interface displaying products with images, prices, sentiment indicators, and detailed specs
+
+### 🧠 Neural Sentiment Analysis
+- **Transformer-Based Model**: Uses DistilBERT fine-tuned on SST-2 from HuggingFace
+- **High Accuracy**: ~91% accuracy with 66M parameter transformer model
+- **Real-Time Analysis**: Analyzes product names and descriptions for sentiment
+- **Visual Indicators**: Emoji-based sentiment display (😊 Positive, 😐 Neutral, 😞 Negative)
+- **Confidence Scores**: Provides sentiment confidence percentages
+- **Batch Processing**: Efficient analysis of multiple products simultaneously
 
 ### RAG Pipeline Strategy
 1. **Local Exact Search** - Fast retrieval from cached products
@@ -28,14 +36,18 @@ numpy>=1.21.0
 Pillow>=9.0.0
 requests>=2.26.0
 webdriver-manager>=3.8.0
+transformers>=4.35.0
+torch>=2.0.0
+datasets>=2.14.0
 ```
 
 ### System Requirements
 - Python 3.8+
 - Chrome Browser
 - ChromeDriver (auto-installed via webdriver-manager)
-- 4GB RAM minimum
+- 8GB RAM minimum (recommended for neural models)
 - Internet connection
+- GPU optional (CUDA-enabled for faster inference)
 
 ## 🚀 Installation
 
@@ -47,12 +59,22 @@ cd "Major Project"
 
 2. **Install dependencies**
 ```bash
-pip install selenium pandas scikit-learn numpy Pillow requests webdriver-manager
+pip install selenium pandas scikit-learn numpy Pillow requests webdriver-manager transformers torch datasets
+```
+
+Or use requirements.txt:
+```bash
+pip install -r requirements.txt
+```
 ```
 
 3. **Run the application**
 ```bash
+# Single Agent Version
 python Try.py
+
+# Multi-Agent Version (with dedicated sentiment analysis agent)
+python multi_agent_scraper.py
 ```
 
 ## 💻 Usage
@@ -62,7 +84,7 @@ python Try.py
 **1. Search Products**
 - Enter product name (e.g., "samsung watch", "iphone 15")
 - Specify number of products per source (default: 5)
-- View results in interactive GUI
+- View results in interactive GUI with sentiment analysis
 
 **2. View Database Statistics**
 - Total products stored
@@ -94,10 +116,14 @@ python Try.py
 ### Project Structure
 ```
 Major Project/
-├── Try.py                      # Main application
-├── README.md                   # Documentation
-├── product_rag_database.pkl    # RAG storage (auto-generated)
-└── knowledge_base.json         # Optional LLM enrichment data
+├── Try.py                          # Single-agent application
+├── multi_agent_scraper.py          # Multi-agent application with dedicated agents
+├── neural_sentiment_analyzer.py    # DistilBERT-based sentiment analysis
+├── README.md                       # Documentation
+├── PROJECT_DOCUMENTATION.md        # Detailed technical documentation
+├── requirements.txt                # Python dependencies
+├── product_rag_database.pkl        # RAG storage (auto-generated)
+└── knowledge_base.json             # Optional LLM enrichment data
 ```
 
 ### Key Components
@@ -107,22 +133,28 @@ Major Project/
 - `ProductRAGStorage`: Product-specific storage with TF-IDF vectorization
 - Semantic search using cosine similarity
 
-**2. Web Scrapers**
+**2. Neural Sentiment Analyzer**
+- `NeuralSentimentAnalyzer`: DistilBERT transformer model for sentiment analysis
+- `DatasetLoader`: HuggingFace dataset loader for Amazon/Yelp reviews
+- Pre-trained on SST-2 with ~91% accuracy
+
+**3. Web Scrapers**
 - `scrape_detailed_amazon()`: Amazon.in scraper with deep product details
 - `scrape_detailed_flipkart()`: Flipkart scraper with retry logic
 - `scrape_amazon_product_details()`: Extracts technical specifications
 - `scrape_flipkart_product_details()`: Extracts product features
 
-**3. Data Processing**
+**4. Data Processing**
 - `unified_rag_search()`: Orchestrates search workflow
 - `filter_only_phones()`: Removes accessories for phone searches
 - `categorize_product()`: Auto-categorizes products
 - `clean_price()`: Normalizes price formats
 
-**4. GUI**
+**5. GUI**
 - `display_results_gui_with_details()`: Interactive product comparison
 - Async image loading
-- Detailed product view with specifications
+- Sentiment indicators with emoji and confidence scores
+- Detailed product view with specifications and sentiment analysis
 - Direct links to product pages
 
 ## 🎯 How It Works
@@ -139,9 +171,26 @@ Web Scraping (Amazon + Flipkart)
     ↓
 Validation & Filtering
     ↓
+Neural Sentiment Analysis (DistilBERT)
+    ↓
 Store in RAG Database
     ↓
-Display Results in GUI
+Display Results in GUI with Sentiment
+```
+
+### Sentiment Analysis Pipeline
+```
+Product Data
+    ↓
+Text Extraction (name + description)
+    ↓
+DistilBERT Tokenization (512 max tokens)
+    ↓
+Transformer Inference
+    ↓
+Softmax Classification
+    ↓
+Sentiment Label + Confidence Score
 ```
 
 ### Validation Logic
@@ -167,6 +216,12 @@ Display Results in GUI
 - Product link
 - Availability status
 
+### Sentiment Information
+- Sentiment label (Positive/Negative/Neutral)
+- Confidence score (0-100%)
+- Sentiment emoji (😊/😐/😞)
+- Detailed explanation
+
 ### Detailed Information
 - Technical specifications (dict)
 - Additional product info (dict)
@@ -182,6 +237,14 @@ Display Results in GUI
 ```python
 max_products = 5  # Products per source
 target_count = max_products * 2  # Total target (both sources)
+```
+
+**Sentiment Analysis Settings**
+```python
+# Model configuration
+model_name = "distilbert/distilbert-base-uncased-finetuned-sst-2-english"
+max_length = 512  # Maximum tokens for analysis
+device = "cuda" if torch.cuda.is_available() else "cpu"
 ```
 
 **Validation Thresholds**
@@ -202,6 +265,7 @@ retry_attempts = 2  # Number of retries
 - **Element Not Found**: Multiple selector fallbacks
 - **Tab Management**: Auto-cleanup of browser tabs on errors
 - **Data Validation**: Skips invalid products without crashing
+- **Model Loading**: Graceful degradation if transformers unavailable
 
 ## 📈 Performance
 
@@ -210,12 +274,22 @@ retry_attempts = 2  # Number of retries
 - **Batch Processing**: Stores multiple products at once
 - **Async Image Loading**: Non-blocking GUI image display
 - **Vectorized Search**: Fast semantic similarity using TF-IDF
+- **GPU Acceleration**: Optional CUDA support for neural models
+
+### Neural Model Specifications
+- **Model**: DistilBERT (66M parameters)
+- **Layers**: 6 transformer layers
+- **Max Tokens**: 512
+- **Accuracy**: ~91% on SST-2 benchmark
+- **Inference**: ~50ms per product (CPU), ~5ms (GPU)
 
 ### Typical Performance
-- First search: 30-60 seconds (scraping)
+- First search: 30-60 seconds (scraping + sentiment analysis)
 - Cached search: <1 second (local retrieval)
+- Sentiment analysis: ~50ms per product
 - Products per search: 2-20 (configurable)
 - Storage size: ~1MB per 100 products
+- Model size: ~268MB (downloaded once)
 
 ## ⚠️ Limitations
 
@@ -224,6 +298,7 @@ retry_attempts = 2  # Number of retries
 - **Regional Availability**: Designed for Amazon.in and Flipkart India
 - **Dynamic Content**: Some products may not load properly
 - **No Authentication**: Cannot access user-specific prices or deals
+- **Model Download**: First run requires ~268MB model download from HuggingFace
 
 ## 🔮 Future Enhancements
 
@@ -233,7 +308,8 @@ retry_attempts = 2  # Number of retries
 - [ ] Export to Excel/CSV with charts
 - [ ] Mobile app version
 - [ ] API for third-party integration
-- [ ] Machine learning for better product matching
+- [ ] Fine-tune sentiment model on product-specific data
+- [ ] Multi-language sentiment analysis support
 
 ## 📝 License
 
@@ -257,8 +333,23 @@ For questions or support, please open an issue in the repository.
 - Selenium WebDriver for browser automation
 - ChromeDriver for Chrome integration
 - scikit-learn for semantic search capabilities
+- HuggingFace Transformers for neural sentiment analysis
+- DistilBERT model from HuggingFace Hub
 - Flipkart scraping reference from [StackOverflow](https://stackoverflow.com/questions/28122882/) (CC BY-SA 3.0)
+
+## 🧠 Neural Model Information
+
+### Supported Datasets (for fine-tuning)
+- **Amazon Polarity**: `mteb/amazon_polarity` - Binary sentiment classification
+- **Amazon Reviews 2023**: `McAuley-Lab/Amazon-Reviews-2023` - Multi-class reviews
+- **Yelp Reviews**: `Yelp/yelp_review_full` - 5-star rating prediction
+
+### Pre-trained Model
+- **DistilBERT SST-2**: `distilbert/distilbert-base-uncased-finetuned-sst-2-english`
+- Fine-tuned on Stanford Sentiment Treebank
+- 66 million parameters
+- 6 transformer layers
 
 ---
 
-**⚡ Built with Python | Powered by RAG | Made for Smart Shopping**
+**⚡ Built with Python | Powered by RAG & Neural Networks | Made for Smart Shopping**

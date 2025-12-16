@@ -18,6 +18,14 @@ from io import BytesIO
 from threading import Thread
 import webbrowser
 
+# Import neural sentiment analyzer
+try:
+    from neural_sentiment_analyzer import NeuralSentimentAnalyzer, TRANSFORMERS_AVAILABLE
+    NEURAL_SENTIMENT_AVAILABLE = TRANSFORMERS_AVAILABLE
+except ImportError:
+    NEURAL_SENTIMENT_AVAILABLE = False
+    print("⚠️ Neural sentiment analyzer not available. Run: pip install transformers torch")
+
 # ==========================================================
 # GLOBAL CONFIG
 # ==========================================================
@@ -1280,7 +1288,44 @@ def display_results_gui(df: pd.DataFrame):
         info_label = tk.Label(frame, text=info, font=("Arial", 9))
         info_label.grid(row=3, column=1, sticky=tk.W, padx=10)
         
-        next_row = 4
+        # Sentiment display (Neural Network Analysis)
+        sentiment = row.get('sentiment', 'unknown')
+        sentiment_emoji = row.get('sentiment_emoji', '❓')
+        sentiment_score = row.get('sentiment_score', 0.5)
+        sentiment_explanation = row.get('sentiment_explanation', '')
+        sentiment_source = row.get('sentiment_source', 'description')
+        
+        sentiment_colors = {
+            'positive': '#27ae60',  # Green
+            'neutral': '#f39c12',   # Orange  
+            'negative': '#e74c3c',  # Red
+            'unknown': '#95a5a6'    # Gray
+        }
+        sentiment_color = sentiment_colors.get(sentiment, '#95a5a6')
+        
+        # Show source of sentiment (reviews or description)
+        source_text = "📝 from reviews" if sentiment_source == "customer_reviews" else "📄 from description"
+        
+        sentiment_label = tk.Label(
+            frame,
+            text=f"{sentiment_emoji} Sentiment: {sentiment.upper()} ({sentiment_score:.0%}) {source_text}",
+            font=("Arial", 10, "bold"),
+            fg=sentiment_color
+        )
+        sentiment_label.grid(row=4, column=1, sticky=tk.W, padx=10)
+        
+        # Sentiment explanation label (why it's positive/negative)
+        if sentiment_explanation and sentiment != 'unknown':
+            explanation_label = tk.Label(
+                frame,
+                text=f"🧠 {sentiment_explanation}",
+                font=("Arial", 9, "italic"),
+                fg="#666"
+            )
+            explanation_label.grid(row=5, column=1, sticky=tk.W, padx=10)
+            next_row = 6
+        else:
+            next_row = 5
         
         # View Details button
         product_row = row.to_dict()
@@ -1306,6 +1351,27 @@ def display_results_gui(df: pd.DataFrame):
                 details_text += f"⭐ Rating: {product_data['rating']}\n"
             if product_data.get('reviews'):
                 details_text += f"💬 Reviews: {product_data['reviews']}\n"
+            
+            # Neural Network Sentiment Analysis info
+            sentiment = product_data.get('sentiment', 'unknown')
+            sentiment_score = product_data.get('sentiment_score', 0.5)
+            sentiment_emoji = product_data.get('sentiment_emoji', '❓')
+            sentiment_explanation = product_data.get('sentiment_explanation', '')
+            sentiment_source = product_data.get('sentiment_source', 'description')
+            
+            details_text += f"\n{sentiment_emoji} NEURAL SENTIMENT ANALYSIS (DistilBERT):\n"
+            details_text += f"   Sentiment: {sentiment.upper()}\n"
+            details_text += f"   Confidence Score: {sentiment_score:.1%}\n"
+            details_text += f"   Source: {'Customer Reviews' if sentiment_source == 'customer_reviews' else 'Product Description'}\n"
+            
+            if product_data.get('sentiment_confidence'):
+                conf = product_data['sentiment_confidence']
+                details_text += f"   Breakdown: Positive={conf.get('positive', 0):.1%}, "
+                details_text += f"Neutral={conf.get('neutral', 0):.1%}, "
+                details_text += f"Negative={conf.get('negative', 0):.1%}\n"
+            
+            if sentiment_explanation:
+                details_text += f"\n   🧠 Analysis: {sentiment_explanation}\n"
             
             details_text += "\n"
             
@@ -1441,6 +1507,37 @@ class FlipkartAgent:
 
     def search(self, product_name: str, max_products: int = 5, fetch_details: bool = True):
         return scrape_flipkart(self.browser_agent.driver, product_name, max_products, fetch_details)
+
+
+class SentimentAgent:
+    """Agent for analyzing product sentiment using Neural Network (DistilBERT)"""
+    
+    def __init__(self):
+        self.analyzer = None
+        self.is_available = False
+        
+        if NEURAL_SENTIMENT_AVAILABLE:
+            try:
+                self.analyzer = NeuralSentimentAnalyzer()
+                self.is_available = self.analyzer.is_ready
+                if self.is_available:
+                    print("✅ Neural Sentiment Analyzer loaded (DistilBERT)")
+                else:
+                    print("⚠️ Neural model not loaded properly")
+            except Exception as e:
+                print(f"⚠️ Could not load neural sentiment analyzer: {e}")
+    
+    def analyze_products(self, products):
+        """Add sentiment analysis to list of products using neural network"""
+        if not self.is_available or not products:
+            # Add default sentiment values
+            for product in products:
+                product['sentiment'] = 'unknown'
+                product['sentiment_score'] = 0.5
+                product['sentiment_emoji'] = '❓'
+            return products
+        
+        return self.analyzer.analyze_products_batch(products)
 
 
 class FilterAgent:
@@ -1689,6 +1786,7 @@ def multi_agent_compare_prices(product_name: str, max_products: int = 5, fetch_d
     amazon_agent = AmazonAgent(amazon_browser)
     flipkart_agent = FlipkartAgent(flipkart_browser)
     filter_agent = FilterAgent()
+    sentiment_agent = SentimentAgent()  # Neural Network sentiment analyzer
     gui_agent = GUIAgent()
 
     amazon_products = []
@@ -1734,6 +1832,9 @@ def multi_agent_compare_prices(product_name: str, max_products: int = 5, fetch_d
 
     # Verification filter against search term (removes off-brand ads)
     all_products = filter_agent.verify_by_search_term(all_products, product_name)
+    
+    # Analyze sentiment for all products using neural network
+    all_products = sentiment_agent.analyze_products(all_products)
 
     df = filter_agent.build_dataframe(all_products)
     if df.empty:

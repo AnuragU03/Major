@@ -28,10 +28,13 @@ from webdriver_manager.chrome import ChromeDriverManager
 import os
 from typing import Dict, List, Any, Optional
 
-
-
-
-
+# Import neural sentiment analyzer
+try:
+    from neural_sentiment_analyzer import NeuralSentimentAnalyzer, TRANSFORMERS_AVAILABLE
+    NEURAL_SENTIMENT_AVAILABLE = TRANSFORMERS_AVAILABLE
+except ImportError:
+    NEURAL_SENTIMENT_AVAILABLE = False
+    print("⚠️ Neural sentiment analyzer not available. Run: pip install transformers torch")
 
 
 # ===========================
@@ -1873,7 +1876,49 @@ def display_results_gui_with_details(df, rag_storage):
                             bg=product_frame['bg'], fg="#555")
         info_label.grid(row=2, column=1, sticky=tk.W, padx=10, pady=3)
         
-        next_row = 3
+        # Sentiment display (Neural Network Analysis)
+        sentiment = row.get('sentiment', 'unknown')
+        sentiment_emoji = row.get('sentiment_emoji', '❓')
+        sentiment_score = row.get('sentiment_score', 0.5)
+        sentiment_explanation = row.get('sentiment_explanation', '')
+        sentiment_source = row.get('sentiment_source', 'description')
+        
+        sentiment_colors = {
+            'positive': '#27ae60',  # Green
+            'neutral': '#f39c12',   # Orange  
+            'negative': '#e74c3c',  # Red
+            'unknown': '#95a5a6'    # Gray
+        }
+        sentiment_color = sentiment_colors.get(sentiment, '#95a5a6')
+        
+        # Show source of sentiment (reviews or description)
+        source_text = "📝 from reviews" if sentiment_source == "customer_reviews" else "📄 from description"
+        
+        # Sentiment main label
+        sentiment_label = tk.Label(
+            product_frame,
+            text=f"{sentiment_emoji} Sentiment: {sentiment.upper()} ({sentiment_score:.0%}) {source_text}",
+            font=("Arial", 10, "bold"),
+            fg=sentiment_color,
+            bg=product_frame['bg']
+        )
+        sentiment_label.grid(row=3, column=1, sticky=tk.W, padx=10, pady=3)
+        
+        # Sentiment explanation label (why it's positive/negative)
+        if sentiment_explanation and sentiment != 'unknown':
+            explanation_label = tk.Label(
+                product_frame,
+                text=f"🧠 {sentiment_explanation}",
+                font=("Arial", 9, "italic"),
+                fg="#666",
+                bg=product_frame['bg'],
+                wraplength=700,
+                justify=tk.LEFT
+            )
+            explanation_label.grid(row=4, column=1, sticky=tk.W, padx=10, pady=1)
+            next_row = 5
+        else:
+            next_row = 4
         
         # Description/Features
         if row.get('description'):
@@ -1917,6 +1962,27 @@ def display_results_gui_with_details(df, rag_storage):
                     details_text += f"Reviews: {product_row['reviews']}\n"
                 if product_row.get('availability'):
                     details_text += f"Availability: {product_row['availability']}\n"
+                
+                # Neural Network Sentiment Analysis info
+                sentiment = product_row.get('sentiment', 'unknown')
+                sentiment_score = product_row.get('sentiment_score', 0.5)
+                sentiment_emoji = product_row.get('sentiment_emoji', '❓')
+                sentiment_explanation = product_row.get('sentiment_explanation', '')
+                sentiment_source = product_row.get('sentiment_source', 'description')
+                
+                details_text += f"\n{sentiment_emoji} NEURAL SENTIMENT ANALYSIS (DistilBERT):\n"
+                details_text += f"   Sentiment: {sentiment.upper()}\n"
+                details_text += f"   Confidence Score: {sentiment_score:.1%}\n"
+                details_text += f"   Source: {'Customer Reviews' if sentiment_source == 'customer_reviews' else 'Product Description'}\n"
+                
+                if product_row.get('sentiment_confidence'):
+                    conf = product_row['sentiment_confidence']
+                    details_text += f"   Breakdown: Positive={conf.get('positive', 0):.1%}, "
+                    details_text += f"Neutral={conf.get('neutral', 0):.1%}, "
+                    details_text += f"Negative={conf.get('negative', 0):.1%}\n"
+                
+                if sentiment_explanation:
+                    details_text += f"\n   🧠 Analysis: {sentiment_explanation}\n"
                 
                 details_text += "\n" + "="*90 + "\n\n"
                 
@@ -2178,6 +2244,31 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
     if not all_products:
         print("\n❌ No products found after filtering.")
         return None
+    
+    # Analyze sentiment for all products using Neural Network
+    if NEURAL_SENTIMENT_AVAILABLE:
+        try:
+            neural_analyzer = NeuralSentimentAnalyzer()
+            if neural_analyzer.is_ready:
+                print(f"\n🧠 Analyzing product sentiment using Neural Network (DistilBERT)...")
+                all_products = neural_analyzer.analyze_products_batch(all_products)
+            else:
+                print("⚠️ Neural model not ready")
+                for p in all_products:
+                    p['sentiment'] = 'unknown'
+                    p['sentiment_score'] = 0.5
+                    p['sentiment_emoji'] = '❓'
+        except Exception as e:
+            print(f"⚠️ Neural sentiment analysis error: {e}")
+            for p in all_products:
+                p['sentiment'] = 'unknown'
+                p['sentiment_score'] = 0.5
+                p['sentiment_emoji'] = '❓'
+    else:
+        for p in all_products:
+            p['sentiment'] = 'unknown'
+            p['sentiment_score'] = 0.5
+            p['sentiment_emoji'] = '❓'
     
     # Products already have complete data from scraping
     print(f"\n✓ Scraped {len(all_products)} products with complete details")

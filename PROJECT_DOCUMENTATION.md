@@ -1,4 +1,4 @@
-# E-Commerce Price Comparison Tool with RAG & Sentiment Analysis
+# E-Commerce Price Comparison Tool with RAG & Neural Network Sentiment Analysis
 
 ## Project Documentation
 
@@ -20,7 +20,7 @@
 
 ### 1.1 Primary Objective
 
-To develop an **intelligent e-commerce price comparison system** that aggregates product information from multiple Indian e-commerce platforms (Amazon.in and Flipkart) and provides users with comprehensive product analysis including pricing, specifications, reviews, and **AI-powered sentiment analysis**.
+To develop an **intelligent e-commerce price comparison system** that aggregates product information from multiple Indian e-commerce platforms (Amazon.in and Flipkart) and provides users with comprehensive product analysis including pricing, specifications, reviews, and **Neural Network-powered sentiment analysis using DistilBERT**.
 
 ### 1.2 Specific Objectives
 
@@ -29,7 +29,7 @@ To develop an **intelligent e-commerce price comparison system** that aggregates
 | 1 | **Multi-Platform Product Aggregation** | Scrape and collect product data from Amazon.in and Flipkart simultaneously for unified comparison |
 | 2 | **RAG-Based Smart Caching** | Implement Retrieval-Augmented Generation (RAG) pipeline with semantic search to cache products locally and reduce redundant scraping |
 | 3 | **Deep Product Information Extraction** | Extract comprehensive product details including technical specifications, features, customer reviews, rating breakdowns, and descriptions |
-| 4 | **Machine Learning Sentiment Analysis** | Train and deploy a sentiment classifier on Amazon reviews dataset to analyze customer sentiment for products |
+| 4 | **Neural Network Sentiment Analysis** | Deploy DistilBERT transformer model fine-tuned on SST-2 with support for Amazon/Yelp review datasets |
 | 5 | **Interactive Visualization** | Provide a rich GUI interface displaying products with images, prices, specs, sentiment scores, and direct purchase links |
 | 6 | **Intelligent Product Filtering** | Automatically filter out accessories, irrelevant products, and validate product relevance to search queries |
 
@@ -38,7 +38,8 @@ To develop an **intelligent e-commerce price comparison system** that aggregates
 **In Scope:**
 - Amazon.in and Flipkart price comparison
 - Product specifications, reviews, and ratings extraction
-- Sentiment analysis using ML (Logistic Regression + TF-IDF)
+- Neural Network sentiment analysis using DistilBERT (Transformer-based)
+- Support for multiple training datasets (Amazon Polarity, Amazon Reviews 2023, Yelp Reviews)
 - Local RAG storage with semantic search
 - Desktop GUI application (Tkinter)
 
@@ -72,15 +73,15 @@ To develop an **intelligent e-commerce price comparison system** that aggregates
               ┌────────────────────┴────────────────────┐
               ▼                                         ▼
 ┌─────────────────────────┐              ┌─────────────────────────────┐
-│   ProductRAGStorage     │              │   Sentiment Analyzer        │
-│   - TF-IDF Vectorizer   │              │   - Logistic Regression     │
-│   - Cosine Similarity   │              │   - TF-IDF Features         │
-│   - Pickle Persistence  │              │   - Negation Handling       │
+│   ProductRAGStorage     │              │   Neural Sentiment Analyzer │
+│   - TF-IDF Vectorizer   │              │   - DistilBERT Transformer  │
+│   - Cosine Similarity   │              │   - HuggingFace Pipeline    │
+│   - Pickle Persistence  │              │   - GPU/CPU Auto-detection  │
 └─────────────────────────┘              └─────────────────────────────┘
               │                                         │
               ▼                                         ▼
 ┌─────────────────────────┐              ┌─────────────────────────────┐
-│  product_rag_db.pkl     │              │  sentiment_model.pkl        │
+│  product_rag_db.pkl     │              │  Pre-trained Model (cached) │
 └─────────────────────────┘              └─────────────────────────────┘
 ```
 
@@ -140,16 +141,36 @@ User Query: "Samsung Galaxy Watch"
 
 ### 2.3 Sentiment Analysis Methodology
 
+The system uses a **Neural Network-based sentiment analyzer** powered by DistilBERT, a transformer model pre-trained on SST-2 (Stanford Sentiment Treebank).
+
 | Step | Process | Technical Details |
 |------|---------|-------------------|
-| **1. Data Collection** | Use Amazon Reviews dataset | `amazon_review.csv` with ratings (1-5 stars) |
-| **2. Label Mapping** | Convert ratings to sentiment | 1-2★ → Negative, 3★ → Neutral, 4-5★ → Positive |
-| **3. Class Balancing** | Undersample majority class | Equal samples per sentiment class |
-| **4. Text Preprocessing** | Clean and prepare text | Lowercase, expand contractions, negation handling |
-| **5. Negation Scope Marking** | Handle negated words | "not good" → "not good_NEG" |
-| **6. Feature Extraction** | TF-IDF Vectorization | max_features=5000, ngram_range=(1,2) |
-| **7. Model Training** | Logistic Regression | Multinomial, balanced class weights |
-| **8. Evaluation** | Classification metrics | Accuracy, Precision, Recall, F1-Score |
+| **1. Model Loading** | Load pre-trained DistilBERT | `distilbert-base-uncased-finetuned-sst-2-english` from HuggingFace |
+| **2. Text Collection** | Gather product text | Priority: Customer Reviews > Review Summary > Description |
+| **3. Preprocessing** | Clean input text | Remove URLs, special chars, truncate to 512 tokens |
+| **4. Inference** | Run through transformer | HuggingFace sentiment-analysis pipeline |
+| **5. Score Mapping** | Convert to 3-class | POSITIVE/NEGATIVE with confidence threshold (0.6) |
+| **6. Aggregation** | Combine multiple reviews | Average scores across all analyzed texts |
+| **7. Explanation** | Generate summary | "Based on X reviews: Y positive, Z negative" |
+
+#### Supported Training Datasets (for fine-tuning)
+
+| Dataset | Source | Size | Labels |
+|---------|--------|------|--------|
+| **Amazon Polarity** | `mteb/amazon_polarity` | 400K+ | Binary (Positive/Negative) |
+| **Amazon Reviews 2023** | `McAuley-Lab/Amazon-Reviews-2023` | Millions | 1-5 Stars by Category |
+| **Yelp Reviews** | `Yelp/yelp_review_full` | 650K+ | 1-5 Stars |
+
+#### Model Architecture
+
+```
+DistilBERT (66M parameters)
+├── 6 Transformer Layers
+├── 768 Hidden Dimensions
+├── 12 Attention Heads
+├── Max Sequence Length: 512 tokens
+└── Fine-tuned on SST-2 for Binary Sentiment
+```
 
 ### 2.4 Web Scraping Methodology
 
@@ -175,8 +196,11 @@ User Query: "Samsung Galaxy Watch"
 | **Programming Language** | Python | 3.8+ |
 | **Web Scraping** | Selenium WebDriver | 4.38.0 |
 | **Browser Automation** | Chrome + ChromeDriver | Auto-managed |
-| **Machine Learning** | scikit-learn | 1.7.2 |
+| **Neural Networks** | PyTorch + Transformers | 2.0+, 4.35+ |
+| **Pre-trained Model** | DistilBERT (HuggingFace) | SST-2 fine-tuned |
+| **Dataset Loading** | HuggingFace Datasets | 2.14+ |
 | **Data Processing** | Pandas, NumPy | 2.3.3, 2.3.4 |
+| **Machine Learning** | scikit-learn | 1.7.2 |
 | **GUI Framework** | Tkinter | Built-in |
 | **Image Processing** | Pillow (PIL) | 12.0.0 |
 | **HTTP Requests** | Requests | 2.32.5 |
@@ -185,34 +209,53 @@ User Query: "Samsung Galaxy Watch"
 
 | Class/Module | File | Purpose |
 |--------------|------|---------|
+| `NeuralSentimentAnalyzer` | `neural_sentiment_analyzer.py` | DistilBERT-based sentiment analysis |
+| `DatasetLoader` | `neural_sentiment_analyzer.py` | Load Amazon/Yelp datasets from HuggingFace |
 | `ProductRAGStorage` | `Try.py` | RAG-based product caching with TF-IDF semantic search |
-| `SentimentAnalyzer` | `sentiment_analyzer.py` | ML-based sentiment classification (Logistic Regression) |
+| `SentimentAgent` | `multi_agent_scraper.py` | Agent wrapper for neural sentiment analysis |
 | `scrape_amazon_in()` | `multi_agent_scraper.py` | Amazon.in product scraper |
 | `scrape_flipkart()` | `multi_agent_scraper.py` | Flipkart product scraper |
 | `scrape_amazon_product_details()` | `multi_agent_scraper.py` | Deep extraction of Amazon product specs |
 | `scrape_flipkart_product_details()` | `multi_agent_scraper.py` | Deep extraction of Flipkart product specs |
 | `display_results_gui_with_details()` | `Try.py` | Interactive product comparison GUI |
 
-### 3.3 Machine Learning Model Specifications
+### 3.3 Neural Network Model Specifications
 
-**Sentiment Classifier Configuration:**
+**DistilBERT Sentiment Classifier:**
 
 ```python
-# Vectorization
-TfidfVectorizer(
-    max_features=5000,
-    ngram_range=(1, 2),   # Unigrams and bigrams
-    min_df=2,
-    max_df=0.95
+# Model from HuggingFace
+model_name = "distilbert/distilbert-base-uncased-finetuned-sst-2-english"
+
+# Pipeline Configuration
+pipeline(
+    "sentiment-analysis",
+    model=model_name,
+    device=0 if cuda_available else -1,  # GPU/CPU auto-detection
+    truncation=True,
+    max_length=512
 )
 
-# Classifier
-LogisticRegression(
-    max_iter=1000,
-    multi_class='multinomial',
-    solver='lbfgs',
-    class_weight='balanced'
-)
+# Output Format
+{
+    'label': 'POSITIVE' or 'NEGATIVE',
+    'score': 0.0 to 1.0  # Confidence
+}
+```
+
+**Sentiment Score Mapping:**
+
+```python
+# Convert binary to 3-class sentiment
+if label == 'POSITIVE' and score > 0.6:
+    sentiment = 'positive'
+elif label == 'NEGATIVE' and score > 0.6:
+    sentiment = 'negative'
+else:
+    sentiment = 'neutral'
+
+# Score normalization (0 = negative, 0.5 = neutral, 1 = positive)
+final_score = 0.5 + (score * 0.5) if positive else 0.5 - (score * 0.5)
 ```
 
 **Semantic Search (RAG) Configuration:**
@@ -249,19 +292,53 @@ cosine_similarity(query_vector, document_vectors)
 
 ```
 Major Project/
-├── Try.py                    # Main application entry point
-├── multi_agent_scraper.py    # Web scraping modules (1900 lines)
-├── sentiment_analyzer.py     # ML sentiment analysis (640 lines)
-├── requirements.txt          # Python dependencies
-├── README.md                 # Project documentation
-├── amazon_review.csv         # Training data (Amazon reviews)
-├── training.1600000...csv    # Alternative training data (Sentiment140)
-├── product_rag_db.pkl        # RAG storage (auto-generated)
-├── sentiment_model.pkl       # Trained model (auto-generated)
-└── __pycache__/              # Python cache
+├── Try.py                        # Main application entry point (RAG + GUI)
+├── multi_agent_scraper.py        # Multi-agent web scraping system
+├── neural_sentiment_analyzer.py  # Neural network sentiment analysis (DistilBERT)
+├── requirements.txt              # Python dependencies
+├── README.md                     # Quick start guide
+├── PROJECT_DOCUMENTATION.md      # This documentation
+├── product_rag_db.pkl            # RAG storage (auto-generated)
+└── __pycache__/                  # Python cache
 ```
 
-### 3.6 Performance Characteristics
+### 3.6 Dependencies (requirements.txt)
+
+```
+# Core Dependencies
+selenium==4.38.0
+pandas==2.3.3
+numpy==2.3.4
+scikit-learn==1.7.2
+Pillow==12.0.0
+requests==2.32.5
+webdriver-manager==4.0.2
+
+# Neural Network Sentiment Analysis (DistilBERT)
+transformers>=4.35.0
+torch>=2.0.0
+datasets>=2.14.0
+```
+
+### 3.6 Dependencies (requirements.txt)
+
+```
+# Core Dependencies
+selenium==4.38.0
+pandas==2.3.3
+numpy==2.3.4
+scikit-learn==1.7.2
+Pillow==12.0.0
+requests==2.32.5
+webdriver-manager==4.0.2
+
+# Neural Network Sentiment Analysis (DistilBERT)
+transformers>=4.35.0
+torch>=2.0.0
+datasets>=2.14.0
+```
+
+### 3.7 Performance Characteristics
 
 | Metric | Value |
 |--------|-------|
@@ -269,27 +346,54 @@ Major Project/
 | Cached search (warm cache) | < 1 second |
 | Products per search | 2-20 (configurable) |
 | Storage per 100 products | ~1 MB |
-| Sentiment model accuracy | ~75-85% (depends on dataset) |
+| Neural model first load | 5-15 seconds (downloads ~260MB model) |
+| Sentiment analysis per product | < 1 second |
+| Model accuracy (SST-2) | ~91% |
+| GPU acceleration | Automatic if CUDA available |
 
-### 3.7 Algorithms Used
+### 3.8 Algorithms Used
 
-1. **TF-IDF (Term Frequency-Inverse Document Frequency)**
-   - Used for text vectorization in both RAG and sentiment analysis
-   - Converts text to numerical feature vectors
+1. **Transformer Architecture (DistilBERT)**
+   - 6-layer distilled version of BERT
+   - Self-attention mechanism for context understanding
+   - Pre-trained on large text corpus, fine-tuned on SST-2
 
-2. **Cosine Similarity**
+2. **TF-IDF (Term Frequency-Inverse Document Frequency)**
+   - Used for text vectorization in RAG storage
+   - Converts text to numerical feature vectors for similarity search
+
+3. **Cosine Similarity**
    - Measures similarity between product descriptions
    - Used for semantic product matching in RAG pipeline
 
-3. **Logistic Regression (Multinomial)**
-   - 3-class sentiment classification (Positive, Neutral, Negative)
-   - Trained on Amazon product reviews
+4. **Sentiment Aggregation**
+   - Analyzes multiple reviews per product
+   - Averages confidence scores for final sentiment
 
-4. **Negation Scope Detection**
-   - Custom NLP preprocessing
-   - Handles "not good" → negative sentiment correctly
+### 3.9 HuggingFace Datasets Integration
 
-### 3.8 Error Handling Mechanisms
+The system supports loading datasets for potential fine-tuning:
+
+```python
+from neural_sentiment_analyzer import DatasetLoader
+
+# Load Amazon Polarity (binary sentiment)
+amazon_data = DatasetLoader.load_amazon_polarity(sample_size=5000)
+
+# Load Amazon Reviews 2023 (by category)
+electronics = DatasetLoader.load_amazon_reviews_2023(category="Electronics")
+
+# Load Yelp Reviews (5-star ratings)
+yelp_data = DatasetLoader.load_yelp_reviews(sample_size=5000)
+
+# Prepare combined dataset for fine-tuning
+combined = DatasetLoader.prepare_combined_dataset(
+    amazon_samples=5000,
+    yelp_samples=5000
+)
+```
+
+### 3.10 Error Handling Mechanisms
 
 | Mechanism | Description |
 |-----------|-------------|
@@ -297,18 +401,21 @@ Major Project/
 | **Element Not Found** | Multiple CSS selector fallbacks |
 | **Tab Management** | Auto-cleanup of browser tabs on errors |
 | **Data Validation** | Skips invalid products without crashing |
-| **Model Fallback** | Returns neutral sentiment if model not trained |
+| **Model Fallback** | Returns 'unknown' sentiment if model not loaded |
+| **GPU Fallback** | Automatic CPU fallback if CUDA unavailable |
+| **Import Protection** | Graceful degradation if transformers not installed |
 
-### 3.9 System Requirements
+### 3.11 System Requirements
 
 - **Operating System:** Windows/Linux/macOS
 - **Python:** 3.8 or higher
 - **Browser:** Google Chrome (latest version)
-- **RAM:** 4GB minimum (8GB recommended)
-- **Storage:** 500MB for application + data
-- **Internet:** Required for web scraping
+- **RAM:** 8GB minimum (16GB recommended for GPU)
+- **Storage:** 1GB for application + model cache
+- **GPU:** Optional (CUDA-compatible for faster inference)
+- **Internet:** Required for web scraping and first model download
 
-### 3.10 Installation & Usage
+### 3.12 Installation & Usage
 
 **Installation:**
 ```bash
@@ -319,15 +426,24 @@ cd "Major Project"
 # Install dependencies
 pip install -r requirements.txt
 
+# Test neural sentiment analyzer (optional)
+python neural_sentiment_analyzer.py
+
 # Run the application
 python Try.py
+```
+
+**Alternative: Multi-Agent Scraper**
+```bash
+# Run the multi-agent version
+python multi_agent_scraper.py
 ```
 
 **Usage:**
 1. Launch the application with `python Try.py`
 2. Enter product name (e.g., "Samsung Galaxy Watch")
 3. Specify number of products per source
-4. View results in interactive GUI with sentiment analysis
+4. View results in interactive GUI with neural sentiment analysis
 
 ---
 
@@ -335,13 +451,25 @@ python Try.py
 
 This project implements a comprehensive e-commerce price comparison system that combines:
 
-- **Web Scraping** (Selenium) for data extraction
+- **Web Scraping** (Selenium) for multi-platform data extraction
 - **RAG Pipeline** (TF-IDF + Cosine Similarity) for smart caching
-- **Machine Learning** (Logistic Regression) for sentiment analysis
-- **GUI** (Tkinter) for user interaction
+- **Neural Network Sentiment Analysis** (DistilBERT Transformer) for accurate review analysis
+- **Multiple Dataset Support** (Amazon Polarity, Amazon Reviews 2023, Yelp Reviews)
+- **GUI** (Tkinter) for interactive user experience
 
-The system provides users with an intelligent way to compare products across platforms while gaining insights into customer sentiment through ML-powered review analysis.
+The system provides users with an intelligent way to compare products across platforms while gaining insights into customer sentiment through state-of-the-art transformer-based NLP models.
+
+### Key Features
+
+| Feature | Technology | Benefit |
+|---------|------------|---------|
+| **Multi-Platform Scraping** | Selenium + Parallel Threading | Amazon.in + Flipkart in one search |
+| **Smart Caching** | TF-IDF RAG | Instant results for repeated searches |
+| **Neural Sentiment** | DistilBERT (91% accuracy) | Accurate sentiment from reviews |
+| **Dataset Flexibility** | HuggingFace Integration | Fine-tune on custom datasets |
+| **GPU Acceleration** | PyTorch CUDA | Fast inference on GPU |
 
 ---
 
-*Document generated for Major Project - December 2025*
+*Document updated for Major Project - December 2025*
+*Neural Network Sentiment Analysis using DistilBERT*
