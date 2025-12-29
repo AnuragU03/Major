@@ -704,6 +704,8 @@ class StealthBrowser:
     
     def human_like_scroll(self, scrolls=3):
         """Scroll like a human"""
+        if not self.driver:
+            return
         for _ in range(scrolls):
             distance = random.randint(200, 800)
             self.driver.execute_script(f"window.scrollBy(0, {distance});")
@@ -788,7 +790,7 @@ class EnhancedSentimentAnalyzer:
             
             print("📦 Loading DistilBERT...")
             self.models['distilbert'] = pipeline(
-                "sentiment-analysis",
+                task="sentiment-analysis",  # type: ignore[arg-type]
                 model="distilbert/distilbert-base-uncased-finetuned-sst-2-english",
                 device=self.device,
                 truncation=True,
@@ -874,7 +876,7 @@ class EnhancedSentimentAnalyzer:
             'neutral': np.mean(scores['neutral']) if scores['neutral'] else 0
         }
         
-        max_sentiment = max(avg_scores, key=avg_scores.get)
+        max_sentiment = max(avg_scores, key=lambda k: avg_scores[k])
         
         return {
             'label': max_sentiment,
@@ -2654,7 +2656,7 @@ class SentimentAgent:
     
     def analyze_products(self, products):
         """Add sentiment analysis to list of products using neural network"""
-        if not self.is_available or not products:
+        if not self.is_available or not products or self.analyzer is None:
             # Add default sentiment values
             for product in products:
                 product['sentiment'] = 'unknown'

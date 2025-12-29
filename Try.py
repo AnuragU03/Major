@@ -818,6 +818,8 @@ class StealthBrowser:
     
     def human_like_mouse_movement(self, element):
         """Simulate human mouse movement to element"""
+        if self.driver is None:
+            raise RuntimeError("Driver is not initialized. Call start() first.")
         action = ActionChains(self.driver)
         action.move_to_element(element).perform()
         time.sleep(random.uniform(0.1, 0.3))
@@ -834,6 +836,8 @@ class StealthBrowser:
     
     def random_scroll(self, scrolls=3):
         """Scroll like a human"""
+        if self.driver is None:
+            raise RuntimeError("Driver is not initialized. Call start() first.")
         for _ in range(scrolls):
             distance = random.randint(200, 800)
             chunks = random.randint(3, 7)
@@ -992,7 +996,7 @@ class EnhancedSentimentAnalyzer:
             
             print("📦 Loading DistilBERT...")
             self.models['distilbert'] = pipeline(
-                "sentiment-analysis",
+                task="sentiment-analysis",  # type: ignore[arg-type]
                 model="distilbert/distilbert-base-uncased-finetuned-sst-2-english",
                 device=self.device,
                 truncation=True,
@@ -1096,7 +1100,7 @@ class EnhancedSentimentAnalyzer:
             'neutral': np.mean(scores['neutral']) if scores['neutral'] else 0
         }
         
-        max_sentiment = max(avg_scores, key=avg_scores.get)
+        max_sentiment = max(avg_scores, key=lambda k: avg_scores[k])
         
         return {
             'label': max_sentiment,

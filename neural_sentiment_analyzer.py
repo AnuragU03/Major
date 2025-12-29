@@ -15,11 +15,12 @@ Model:
 import os
 import re
 import warnings
+from typing import Any, cast
 warnings.filterwarnings('ignore')
 
 # Check for transformers availability
 try:
-    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
+    from transformers import pipeline as hf_pipeline, AutoTokenizer, AutoModelForSequenceClassification
     import torch
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
@@ -58,7 +59,7 @@ class NeuralSentimentAnalyzer:
             print(f"   Device: {self.device}")
             
             # Use pipeline for easy inference
-            self.pipeline = pipeline(
+            self.pipeline = cast(Any, hf_pipeline)(
                 "sentiment-analysis",
                 model=self.model_name,
                 device=0 if self.device == "cuda" else -1,
@@ -124,6 +125,13 @@ class NeuralSentimentAnalyzer:
                 }
             
             # Get prediction from model
+            if self.pipeline is None:
+                return {
+                    'sentiment': 'unknown',
+                    'score': 0.5,
+                    'confidence': {'positive': 0.5, 'negative': 0.5},
+                    'label': 'UNKNOWN'
+                }
             result = self.pipeline(clean_text)[0]
             
             label = result['label']  # POSITIVE or NEGATIVE
@@ -412,9 +420,10 @@ class DatasetLoader:
         if amazon_data:
             for item in amazon_data:
                 # Amazon polarity: 0=negative, 1=positive
-                label = 2 if item['label'] == 1 else 0  # Map to our 3-class
+                item_dict = cast(dict[str, Any], item)
+                label = 2 if item_dict['label'] == 1 else 0  # Map to our 3-class
                 combined_data.append({
-                    'text': item['text'],
+                    'text': item_dict['text'],
                     'label': label,
                     'source': 'amazon_polarity'
                 })
@@ -424,7 +433,8 @@ class DatasetLoader:
         if yelp_data:
             for item in yelp_data:
                 # Yelp: 1-5 stars -> 0 (1-2), 1 (3), 2 (4-5)
-                stars = item['label'] + 1  # Dataset is 0-indexed
+                item_dict = cast(dict[str, Any], item)
+                stars = item_dict['label'] + 1  # Dataset is 0-indexed
                 if stars <= 2:
                     label = 0  # Negative
                 elif stars == 3:
@@ -432,7 +442,7 @@ class DatasetLoader:
                 else:
                     label = 2  # Positive
                 combined_data.append({
-                    'text': item['text'],
+                    'text': item_dict['text'],
                     'label': label,
                     'source': 'yelp'
                 })
