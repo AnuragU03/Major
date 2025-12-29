@@ -36,6 +36,1204 @@ except ImportError:
     NEURAL_SENTIMENT_AVAILABLE = False
     print("⚠️ Neural sentiment analyzer not available. Run: pip install transformers torch")
 
+# Import for anti-detection
+import string
+import pickle
+from selenium.webdriver.common.action_chains import ActionChains
+
+
+# ===========================
+# ADVANCED REVIEW SCRAPER
+# ===========================
+
+class AdvancedReviewScraper:
+    """
+    Advanced Review Scraper with Multiple Fallback Strategies
+    Handles dynamic loading, pagination, and anti-bot measures
+    """
+    
+    def __init__(self, driver):
+        self.driver = driver
+        self.wait = WebDriverWait(driver, 15)
+    
+    def human_like_scroll(self, scrolls=3):
+        """Simulate human scrolling behavior"""
+        for i in range(scrolls):
+            scroll_distance = random.randint(300, 700)
+            self.driver.execute_script(f"window.scrollBy(0, {scroll_distance});")
+            time.sleep(random.uniform(0.5, 1.5))
+    
+    def extract_amazon_reviews_deep(self, product_url, max_reviews=50):
+        """
+        Extract Amazon reviews with multiple strategies
+        Returns: List of review dictionaries
+        """
+        print(f"🔍 Deep scraping Amazon reviews from: {product_url}")
+        
+        all_reviews = []
+        
+        try:
+            self.driver.get(product_url)
+            time.sleep(random.uniform(2, 4))
+            
+            # Strategy 1: Click "See All Reviews" button
+            try:
+                see_all_btn = self.wait.until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, 
+                        "a[data-hook='see-all-reviews-link-foot'], "
+                        "a[href*='customerReviews'], "
+                        ".a-link-emphasis[href*='reviews']"))
+                )
+                see_all_btn.click()
+                time.sleep(random.uniform(3, 5))
+                print("✅ Navigated to reviews page")
+            except:
+                print("⚠️ Could not find 'See All Reviews' button, staying on product page")
+            
+            # Strategy 2: Extract reviews with multiple selectors
+            reviews_extracted = 0
+            page_num = 1
+            
+            while reviews_extracted < max_reviews and page_num <= 5:
+                print(f"📄 Scraping page {page_num}...")
+                
+                try:
+                    self.wait.until(EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, "[data-hook='review'], .review, .a-section.review")
+                    ))
+                except TimeoutException:
+                    print("⚠️ Reviews not loading, trying alternative selectors")
+                
+                self.human_like_scroll(scrolls=5)
+                time.sleep(2)
+                
+                review_selectors = [
+                    "[data-hook='review']",
+                    ".review",
+                    ".a-section.review",
+                    "[data-hook='review-collapsed']"
+                ]
+                
+                review_elements = []
+                for selector in review_selectors:
+                    try:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        if elements:
+                            review_elements = elements
+                            print(f"✅ Found {len(elements)} reviews with selector: {selector}")
+                            break
+                    except:
+                        continue
+                
+                if not review_elements:
+                    print("❌ No reviews found on this page")
+                    break
+                
+                for elem in review_elements:
+                    if reviews_extracted >= max_reviews:
+                        break
+                    
+                    try:
+                        review_data = self._extract_amazon_review_data(elem)
+                        if review_data and review_data['text']:
+                            all_reviews.append(review_data)
+                            reviews_extracted += 1
+                    except Exception as e:
+                        print(f"⚠️ Failed to extract review: {e}")
+                        continue
+                
+                if reviews_extracted < max_reviews:
+                    if not self._click_next_page_amazon():
+                        break
+                    page_num += 1
+                    time.sleep(random.uniform(3, 5))
+                else:
+                    break
+            
+            print(f"✅ Successfully extracted {len(all_reviews)} Amazon reviews")
+            return all_reviews
+            
+        except Exception as e:
+            print(f"❌ Amazon review scraping failed: {e}")
+            return all_reviews
+    
+    def _extract_amazon_review_data(self, element):
+        """Extract structured data from a single review element"""
+        review = {
+            'text': '',
+            'rating': 0,
+            'title': '',
+            'author': '',
+            'date': '',
+            'verified': False,
+            'helpful_count': 0
+        }
+        
+        try:
+            text_selectors = [
+                "[data-hook='review-body'] span",
+                ".review-text-content span",
+                ".a-expander-content.reviewText span"
+            ]
+            for selector in text_selectors:
+                try:
+                    text_elem = element.find_element(By.CSS_SELECTOR, selector)
+                    review['text'] = text_elem.text.strip()
+                    if review['text']:
+                        break
+                except:
+                    continue
+            
+            try:
+                rating_elem = element.find_element(By.CSS_SELECTOR, 
+                    "[data-hook='review-star-rating'] span, .review-rating span")
+                rating_text = rating_elem.get_attribute('textContent')
+                review['rating'] = float(rating_text.split()[0])
+            except:
+                pass
+            
+            try:
+                title_elem = element.find_element(By.CSS_SELECTOR, 
+                    "[data-hook='review-title'], .review-title span")
+                review['title'] = title_elem.text.strip()
+            except:
+                pass
+            
+            try:
+                author_elem = element.find_element(By.CSS_SELECTOR, 
+                    "[data-hook='review-author'], .a-profile-name")
+                review['author'] = author_elem.text.strip()
+            except:
+                pass
+            
+            try:
+                date_elem = element.find_element(By.CSS_SELECTOR, 
+                    "[data-hook='review-date'], .review-date")
+                review['date'] = date_elem.text.strip()
+            except:
+                pass
+            
+            try:
+                verified = element.find_element(By.CSS_SELECTOR, 
+                    "[data-hook='avp-badge'], .a-color-success")
+                review['verified'] = 'Verified Purchase' in verified.text
+            except:
+                pass
+            
+            try:
+                helpful_elem = element.find_element(By.CSS_SELECTOR, 
+                    "[data-hook='helpful-vote-statement']")
+                helpful_text = helpful_elem.text
+                numbers = re.findall(r'\d+', helpful_text)
+                if numbers:
+                    review['helpful_count'] = int(numbers[0])
+            except:
+                pass
+            
+            return review
+            
+        except Exception as e:
+            print(f"⚠️ Error extracting review data: {e}")
+            return review
+    
+    def _click_next_page_amazon(self):
+        """Navigate to next review page"""
+        try:
+            next_selectors = [
+                "li.a-last a",
+                ".a-pagination .a-last a",
+                "a[aria-label='Next page']"
+            ]
+            
+            for selector in next_selectors:
+                try:
+                    next_btn = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    if 'a-disabled' not in (next_btn.get_attribute('class') or ''):
+                        next_btn.click()
+                        return True
+                except:
+                    continue
+            
+            return False
+        except:
+            return False
+    
+    def extract_flipkart_reviews_deep(self, product_url, max_reviews=50):
+        """
+        Extract Flipkart reviews with AJAX handling
+        Returns: List of review dictionaries
+        """
+        print(f"🔍 Deep scraping Flipkart reviews from: {product_url}")
+        
+        all_reviews = []
+        
+        try:
+            self.driver.get(product_url)
+            time.sleep(random.uniform(3, 5))
+            
+            try:
+                reviews_section = self.driver.find_element(By.CSS_SELECTOR, 
+                    "div[class*='_1YokD2'], div[class*='col._2a50qk'], div.col.JOpGWq")
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", reviews_section)
+                time.sleep(2)
+            except:
+                print("⚠️ Could not locate reviews section, scrolling down")
+                self.human_like_scroll(scrolls=8)
+            
+            reviews_extracted = 0
+            page_num = 1
+            
+            while reviews_extracted < max_reviews and page_num <= 5:
+                print(f"📄 Scraping page {page_num}...")
+                
+                try:
+                    self.wait.until(EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, "div[class*='_1AtVbE'], div.col._2wzgFH")
+                    ))
+                except:
+                    print("⚠️ Reviews not loading")
+                
+                self.human_like_scroll(scrolls=3)
+                time.sleep(2)
+                
+                review_selectors = [
+                    "div[class*='_1AtVbE']",
+                    "div.col._2wzgFH",
+                    "div[class*='review']"
+                ]
+                
+                review_elements = []
+                for selector in review_selectors:
+                    try:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        if elements:
+                            review_elements = elements
+                            print(f"✅ Found {len(elements)} reviews with selector: {selector}")
+                            break
+                    except:
+                        continue
+                
+                if not review_elements:
+                    print("❌ No reviews found")
+                    break
+                
+                for elem in review_elements:
+                    if reviews_extracted >= max_reviews:
+                        break
+                    
+                    try:
+                        review_data = self._extract_flipkart_review_data(elem)
+                        if review_data and review_data['text']:
+                            all_reviews.append(review_data)
+                            reviews_extracted += 1
+                    except Exception as e:
+                        print(f"⚠️ Failed to extract review: {e}")
+                        continue
+                
+                if reviews_extracted < max_reviews:
+                    if not self._click_next_page_flipkart():
+                        break
+                    page_num += 1
+                    time.sleep(random.uniform(3, 5))
+                else:
+                    break
+            
+            print(f"✅ Successfully extracted {len(all_reviews)} Flipkart reviews")
+            return all_reviews
+            
+        except Exception as e:
+            print(f"❌ Flipkart review scraping failed: {e}")
+            return all_reviews
+    
+    def _extract_flipkart_review_data(self, element):
+        """Extract structured data from Flipkart review"""
+        review = {
+            'text': '',
+            'rating': 0,
+            'title': '',
+            'author': '',
+            'date': '',
+            'verified': False,
+            'helpful_count': 0
+        }
+        
+        try:
+            text_selectors = [
+                "div[class*='t-ZTKy']",
+                "div.t-ZTKy",
+                "div[class*='_6K-7Co']"
+            ]
+            for selector in text_selectors:
+                try:
+                    text_elem = element.find_element(By.CSS_SELECTOR, selector)
+                    review['text'] = text_elem.text.strip()
+                    if review['text']:
+                        break
+                except:
+                    continue
+            
+            try:
+                rating_elem = element.find_element(By.CSS_SELECTOR, 
+                    "div[class*='_3LWZlK'], div.XQDdHH")
+                rating_text = rating_elem.text.strip()
+                review['rating'] = float(rating_text.split()[0]) if rating_text else 0
+            except:
+                pass
+            
+            try:
+                title_elem = element.find_element(By.CSS_SELECTOR, "p[class*='_2-N8zT']")
+                review['title'] = title_elem.text.strip()
+            except:
+                pass
+            
+            try:
+                author_elem = element.find_element(By.CSS_SELECTOR, "p[class*='_2sc7ZR']")
+                author_text = author_elem.text.strip()
+                review['author'] = author_text
+                review['verified'] = 'Certified Buyer' in author_text
+            except:
+                pass
+            
+            return review
+            
+        except Exception as e:
+            print(f"⚠️ Error extracting Flipkart review: {e}")
+            return review
+    
+    def _click_next_page_flipkart(self):
+        """Navigate to next page on Flipkart"""
+        try:
+            next_btn = self.driver.find_element(By.CSS_SELECTOR, 
+                "a[class*='_1LKTO3']:last-child, nav a:last-child")
+            
+            if 'disabled' not in (next_btn.get_attribute('class') or ''):
+                next_btn.click()
+                return True
+            return False
+        except:
+            return False
+
+
+# ===========================
+# CROMA SCRAPER
+# ===========================
+
+class CromaScraper:
+    """Scraper for Croma.com"""
+    
+    def __init__(self, driver):
+        self.driver = driver
+        self.wait = WebDriverWait(driver, 15)
+        self.base_url = "https://www.croma.com"
+    
+    def search_products(self, query, max_products=10):
+        """Search for products on Croma"""
+        print(f"🔍 Searching Croma for: {query}")
+        
+        products = []
+        
+        try:
+            search_url = f"{self.base_url}/search/?q={query.replace(' ', '%20')}"
+            self.driver.get(search_url)
+            time.sleep(random.uniform(3, 5))
+            
+            try:
+                self.wait.until(EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, ".product-item, .product, li.plp-card")
+                ))
+            except TimeoutException:
+                print("⚠️ No products found on Croma")
+                return products
+            
+            for _ in range(3):
+                self.driver.execute_script("window.scrollBy(0, 800);")
+                time.sleep(random.uniform(1, 2))
+            
+            product_selectors = [
+                ".product-item",
+                "li.plp-card",
+                ".cp-product",
+                "div[class*='product']"
+            ]
+            
+            product_elements = []
+            for selector in product_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if elements:
+                        product_elements = elements[:max_products]
+                        print(f"✅ Found {len(product_elements)} products on Croma")
+                        break
+                except:
+                    continue
+            
+            for elem in product_elements:
+                try:
+                    product = self._extract_croma_product(elem)
+                    if product and product['name'] and product['price']:
+                        products.append(product)
+                        if len(products) >= max_products:
+                            break
+                except Exception as e:
+                    print(f"⚠️ Failed to extract Croma product: {e}")
+                    continue
+            
+            print(f"✅ Extracted {len(products)} products from Croma")
+            return products
+            
+        except Exception as e:
+            print(f"❌ Croma scraping failed: {e}")
+            return products
+    
+    def _extract_croma_product(self, element):
+        """Extract product data from Croma listing"""
+        product = {
+            'name': '',
+            'price': 0,
+            'price_numeric': 0,
+            'original_price': 0,
+            'discount': 0,
+            'rating': '',
+            'reviews': '',
+            'image_url': '',
+            'product_link': '',
+            'source': 'Croma',
+            'category': 'Electronics',
+            'subcategory': 'General',
+            'availability': 'In Stock',
+            'emi_available': False,
+            'technical_details': {},
+            'features': [],
+            'description': ''
+        }
+        
+        try:
+            name_selectors = ["h3.product-title", ".cp-product__title", "a.product-title", "h3 a"]
+            for selector in name_selectors:
+                try:
+                    name_elem = element.find_element(By.CSS_SELECTOR, selector)
+                    product['name'] = name_elem.text.strip()
+                    if product['name']:
+                        break
+                except:
+                    continue
+            
+            link_selectors = ["a.product-link", "h3 a", "a[href*='/p/']"]
+            for selector in link_selectors:
+                try:
+                    link_elem = element.find_element(By.CSS_SELECTOR, selector)
+                    href = link_elem.get_attribute('href')
+                    product['product_link'] = href if href.startswith('http') else self.base_url + href
+                    break
+                except:
+                    continue
+            
+            price_selectors = [".product-price .amount", ".new-price", "span[class*='price']", ".price-final"]
+            for selector in price_selectors:
+                try:
+                    price_elem = element.find_element(By.CSS_SELECTOR, selector)
+                    price_text = price_elem.text.strip()
+                    product['price'] = price_text
+                    product['price_numeric'] = self._clean_price(price_text)
+                    if product['price_numeric'] > 0:
+                        break
+                except:
+                    continue
+            
+            try:
+                original_elem = element.find_element(By.CSS_SELECTOR, ".old-price, .price-old, .product-price .old")
+                original_text = original_elem.text.strip()
+                product['original_price'] = self._clean_price(original_text)
+                
+                if product['original_price'] > product['price_numeric']:
+                    product['discount'] = round(
+                        ((product['original_price'] - product['price_numeric']) / product['original_price']) * 100, 1
+                    )
+            except:
+                product['original_price'] = product['price_numeric']
+            
+            try:
+                rating_elem = element.find_element(By.CSS_SELECTOR, ".product-rating, .rating, [class*='star']")
+                rating_text = rating_elem.text.strip()
+                numbers = re.findall(r'(\d+\.?\d*)', rating_text)
+                if numbers:
+                    product['rating'] = numbers[0]
+            except:
+                pass
+            
+            img_selectors = ["img.product-image", "img[class*='product']", "img"]
+            for selector in img_selectors:
+                try:
+                    img_elem = element.find_element(By.CSS_SELECTOR, selector)
+                    product['image_url'] = img_elem.get_attribute('src') or img_elem.get_attribute('data-src')
+                    if product['image_url']:
+                        break
+                except:
+                    continue
+            
+            try:
+                emi_elem = element.find_element(By.CSS_SELECTOR, "[class*='emi'], [class*='EMI']")
+                product['emi_available'] = True
+            except:
+                pass
+            
+            return product
+            
+        except Exception as e:
+            print(f"⚠️ Error extracting Croma product: {e}")
+            return product
+    
+    def _clean_price(self, price_text):
+        """Extract numeric price from text"""
+        try:
+            cleaned = re.sub(r'[^\d.]', '', price_text)
+            return float(cleaned) if cleaned else 0
+        except:
+            return 0
+
+
+# ===========================
+# RELIANCE DIGITAL SCRAPER
+# ===========================
+
+class RelianceDigitalScraper:
+    """Scraper for RelianceDigital.in"""
+    
+    def __init__(self, driver):
+        self.driver = driver
+        self.wait = WebDriverWait(driver, 15)
+        self.base_url = "https://www.reliancedigital.in"
+    
+    def search_products(self, query, max_products=10):
+        """Search for products on Reliance Digital"""
+        print(f"🔍 Searching Reliance Digital for: {query}")
+        
+        products = []
+        
+        try:
+            search_url = f"{self.base_url}/search?q={query.replace(' ', '+')}"
+            self.driver.get(search_url)
+            time.sleep(random.uniform(3, 5))
+            
+            try:
+                self.wait.until(EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, ".sp, .product-card, [class*='product']")
+                ))
+            except TimeoutException:
+                print("⚠️ No products found on Reliance Digital")
+                return products
+            
+            for _ in range(3):
+                self.driver.execute_script("window.scrollBy(0, 800);")
+                time.sleep(random.uniform(1, 2))
+            
+            product_selectors = [".sp", ".product-card", "[data-testid='product-card']", "div[class*='product']"]
+            
+            product_elements = []
+            for selector in product_selectors:
+                try:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if elements:
+                        product_elements = elements[:max_products]
+                        print(f"✅ Found {len(product_elements)} products on Reliance Digital")
+                        break
+                except:
+                    continue
+            
+            for elem in product_elements:
+                try:
+                    product = self._extract_reliance_product(elem)
+                    if product and product['name'] and product['price_numeric']:
+                        products.append(product)
+                        if len(products) >= max_products:
+                            break
+                except Exception as e:
+                    print(f"⚠️ Failed to extract Reliance product: {e}")
+                    continue
+            
+            print(f"✅ Extracted {len(products)} products from Reliance Digital")
+            return products
+            
+        except Exception as e:
+            print(f"❌ Reliance Digital scraping failed: {e}")
+            return products
+    
+    def _extract_reliance_product(self, element):
+        """Extract product data from Reliance Digital listing"""
+        product = {
+            'name': '',
+            'price': '',
+            'price_numeric': 0,
+            'original_price': 0,
+            'discount': 0,
+            'rating': '',
+            'reviews': '',
+            'image_url': '',
+            'product_link': '',
+            'source': 'Reliance Digital',
+            'category': 'Electronics',
+            'subcategory': 'General',
+            'availability': 'In Stock',
+            'delivery_available': False,
+            'technical_details': {},
+            'features': [],
+            'description': ''
+        }
+        
+        try:
+            name_selectors = [".sp__name", ".product-title", "h3", "[class*='title']"]
+            for selector in name_selectors:
+                try:
+                    name_elem = element.find_element(By.CSS_SELECTOR, selector)
+                    product['name'] = name_elem.text.strip()
+                    if product['name']:
+                        break
+                except:
+                    continue
+            
+            try:
+                link_elem = element.find_element(By.CSS_SELECTOR, "a")
+                href = link_elem.get_attribute('href')
+                product['product_link'] = href if href.startswith('http') else self.base_url + href
+            except:
+                pass
+            
+            price_selectors = [".sp__price", ".product-price", "[class*='price'] span"]
+            for selector in price_selectors:
+                try:
+                    price_elem = element.find_element(By.CSS_SELECTOR, selector)
+                    price_text = price_elem.text.strip()
+                    product['price'] = price_text
+                    product['price_numeric'] = self._clean_price(price_text)
+                    if product['price_numeric'] > 0:
+                        break
+                except:
+                    continue
+            
+            try:
+                original_elem = element.find_element(By.CSS_SELECTOR, ".sp__price--strike, .old-price, [class*='strike']")
+                original_text = original_elem.text.strip()
+                product['original_price'] = self._clean_price(original_text)
+                
+                if product['original_price'] > product['price_numeric']:
+                    product['discount'] = round(
+                        ((product['original_price'] - product['price_numeric']) / product['original_price']) * 100, 1
+                    )
+            except:
+                product['original_price'] = product['price_numeric']
+            
+            try:
+                rating_elem = element.find_element(By.CSS_SELECTOR, ".sp__rating, [class*='rating']")
+                rating_text = rating_elem.text.strip()
+                numbers = re.findall(r'(\d+\.?\d*)', rating_text)
+                if numbers:
+                    product['rating'] = numbers[0]
+            except:
+                pass
+            
+            try:
+                img_elem = element.find_element(By.CSS_SELECTOR, "img")
+                product['image_url'] = (img_elem.get_attribute('src') or 
+                                       img_elem.get_attribute('data-src') or 
+                                       img_elem.get_attribute('data-lazy-src'))
+            except:
+                pass
+            
+            return product
+            
+        except Exception as e:
+            print(f"⚠️ Error extracting Reliance product: {e}")
+            return product
+    
+    def _clean_price(self, price_text):
+        """Extract numeric price"""
+        try:
+            cleaned = re.sub(r'[^\d.]', '', price_text)
+            return float(cleaned) if cleaned else 0
+        except:
+            return 0
+
+
+# ===========================
+# STEALTH BROWSER (Anti-Detection)
+# ===========================
+
+class StealthBrowser:
+    """Anti-detection browser automation - Makes Selenium undetectable"""
+    
+    def __init__(self, use_proxy=False, proxy_list=None):
+        self.options = Options()
+        self.use_proxy = use_proxy
+        self.proxy_list = proxy_list or []
+        self._configure_stealth()
+        self.driver = None
+        self.session_file = 'browser_session.pkl'
+    
+    def start(self):
+        """Start the stealth browser"""
+        self.driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=self.options)
+        self._apply_stealth_scripts()
+        self._load_session()
+        return self.driver
+    
+    def _configure_stealth(self):
+        """Configure Chrome options for stealth"""
+        self.options.add_argument('--disable-blink-features=AutomationControlled')
+        self.options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        self.options.add_experimental_option('useAutomationExtension', False)
+        
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        ]
+        self.options.add_argument(f'user-agent={random.choice(user_agents)}')
+        
+        resolutions = ['1920,1080', '1366,768', '1440,900', '1536,864', '1280,720']
+        self.options.add_argument(f'--window-size={random.choice(resolutions)}')
+        
+        self.options.add_argument('--disable-gpu')
+        self.options.add_argument('--no-sandbox')
+        self.options.add_argument('--disable-dev-shm-usage')
+        self.options.add_argument('--lang=en-IN')
+        self.options.add_argument('--disable-webrtc')
+        self.options.add_experimental_option('prefs', {
+            'intl.accept_languages': 'en-IN,en-US,en',
+            'profile.default_content_setting_values.geolocation': 1
+        })
+        
+        if self.use_proxy and self.proxy_list:
+            proxy = random.choice(self.proxy_list)
+            self.options.add_argument(f'--proxy-server={proxy}')
+    
+    def _apply_stealth_scripts(self):
+        """Apply JavaScript to hide automation"""
+        if not self.driver:
+            return
+        
+        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined});")
+        self.driver.execute_script("window.navigator.chrome = {runtime: {}};")
+        self.driver.execute_script("Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});")
+        self.driver.execute_script("Object.defineProperty(navigator, 'languages', {get: () => ['en-IN', 'en-US', 'en']});")
+    
+    def human_like_mouse_movement(self, element):
+        """Simulate human mouse movement to element"""
+        action = ActionChains(self.driver)
+        action.move_to_element(element).perform()
+        time.sleep(random.uniform(0.1, 0.3))
+    
+    def human_like_typing(self, element, text):
+        """Type like a human with random delays"""
+        element.clear()
+        for char in text:
+            element.send_keys(char)
+            if char == ' ':
+                time.sleep(random.uniform(0.1, 0.3))
+            else:
+                time.sleep(random.uniform(0.05, 0.15))
+    
+    def random_scroll(self, scrolls=3):
+        """Scroll like a human"""
+        for _ in range(scrolls):
+            distance = random.randint(200, 800)
+            chunks = random.randint(3, 7)
+            for chunk in range(chunks):
+                self.driver.execute_script(f"window.scrollBy(0, {distance // chunks});")
+                time.sleep(random.uniform(0.1, 0.3))
+            time.sleep(random.uniform(1, 3))
+            
+            if random.random() < 0.3:
+                self.driver.execute_script(f"window.scrollBy(0, -{random.randint(50, 150)});")
+                time.sleep(random.uniform(0.5, 1))
+    
+    def smart_wait(self, min_seconds=2, max_seconds=5):
+        """Wait with random delays"""
+        base_wait = random.uniform(min_seconds, max_seconds)
+        time.sleep(base_wait)
+        if random.random() < 0.2:
+            time.sleep(random.uniform(2, 5))
+    
+    def _save_session(self):
+        """Save cookies and session data"""
+        try:
+            if self.driver:
+                cookies = self.driver.get_cookies()
+                with open(self.session_file, 'wb') as f:
+                    pickle.dump(cookies, f)
+        except:
+            pass
+    
+    def _load_session(self):
+        """Load previous session cookies"""
+        try:
+            if os.path.exists(self.session_file) and self.driver:
+                with open(self.session_file, 'rb') as f:
+                    cookies = pickle.load(f)
+                
+                self.driver.get("https://www.amazon.in")
+                for cookie in cookies:
+                    try:
+                        self.driver.add_cookie(cookie)
+                    except:
+                        pass
+                print("✅ Session restored")
+        except:
+            pass
+    
+    def close(self):
+        """Save session and close"""
+        self._save_session()
+        if self.driver:
+            self.driver.quit()
+
+
+# ===========================
+# RATE LIMITER
+# ===========================
+
+class RateLimiter:
+    """Request rate limiting to avoid detection"""
+    
+    def __init__(self, requests_per_minute=10):
+        self.requests_per_minute = requests_per_minute
+        self.request_times = []
+    
+    def wait_if_needed(self):
+        """Wait if rate limit would be exceeded"""
+        now = time.time()
+        self.request_times = [t for t in self.request_times if now - t < 60]
+        
+        if len(self.request_times) >= self.requests_per_minute:
+            oldest = min(self.request_times)
+            wait_time = 60 - (now - oldest) + random.uniform(1, 3)
+            
+            if wait_time > 0:
+                print(f"⏳ Rate limit: waiting {wait_time:.1f}s...")
+                time.sleep(wait_time)
+        
+        self.request_times.append(time.time())
+
+
+# ===========================
+# SMART RETRY HANDLER
+# ===========================
+
+class SmartRetryHandler:
+    """Intelligent retry with exponential backoff"""
+    
+    def __init__(self, max_retries=3):
+        self.max_retries = max_retries
+    
+    def retry_with_backoff(self, func, *args, **kwargs):
+        """Execute function with retry logic"""
+        for attempt in range(self.max_retries):
+            try:
+                result = func(*args, **kwargs)
+                return result
+            except Exception as e:
+                if attempt == self.max_retries - 1:
+                    print(f"❌ Failed after {self.max_retries} attempts: {e}")
+                    raise
+                
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                print(f"⚠️ Attempt {attempt + 1} failed, retrying in {wait_time:.1f}s...")
+                time.sleep(wait_time)
+
+
+# ===========================
+# ENHANCED SENTIMENT ANALYZER (Multi-Model)
+# ===========================
+
+class EnhancedSentimentAnalyzer:
+    """
+    Multi-model sentiment analyzer with advanced features:
+    - DistilBERT for general sentiment
+    - RoBERTa for nuanced analysis (optional)
+    - Aspect-based sentiment extraction
+    - Key phrase extraction
+    """
+    
+    def __init__(self, use_gpu=True):
+        self.device = -1  # CPU by default
+        self.models = {}
+        self.is_ready = False
+        
+        if NEURAL_SENTIMENT_AVAILABLE:
+            try:
+                import torch
+                self.device = 0 if (use_gpu and torch.cuda.is_available()) else -1
+            except:
+                pass
+        
+        print(f"🚀 Initializing Enhanced Sentiment Analyzer (Device: {'GPU' if self.device == 0 else 'CPU'})")
+        
+        self.aspects = {
+            'quality': ['quality', 'build', 'material', 'durable', 'sturdy', 'solid', 'premium'],
+            'performance': ['performance', 'speed', 'fast', 'slow', 'efficient', 'smooth', 'lag'],
+            'value': ['worth', 'price', 'expensive', 'cheap', 'value', 'money', 'affordable'],
+            'design': ['design', 'look', 'appearance', 'beautiful', 'ugly', 'sleek', 'style'],
+            'features': ['feature', 'function', 'capability', 'option', 'setting'],
+            'battery': ['battery', 'charge', 'charging', 'power', 'backup'],
+            'camera': ['camera', 'photo', 'picture', 'image', 'video'],
+            'display': ['screen', 'display', 'resolution', 'brightness', 'color'],
+            'service': ['service', 'support', 'warranty', 'delivery', 'shipping']
+        }
+        
+        self._load_models()
+    
+    def _load_models(self):
+        """Load sentiment analysis models"""
+        if not NEURAL_SENTIMENT_AVAILABLE:
+            print("⚠️ Transformers not available")
+            return
+        
+        try:
+            from transformers import pipeline
+            
+            print("📦 Loading DistilBERT...")
+            self.models['distilbert'] = pipeline(
+                "sentiment-analysis",
+                model="distilbert/distilbert-base-uncased-finetuned-sst-2-english",
+                device=self.device,
+                truncation=True,
+                max_length=512
+            )
+            
+            self.is_ready = True
+            print("✅ Sentiment models loaded successfully!")
+            
+        except Exception as e:
+            print(f"⚠️ Error loading models: {e}")
+            self.is_ready = False
+    
+    def analyze_product(self, reviews_list, product_name="", description=""):
+        """Comprehensive product sentiment analysis"""
+        if not reviews_list and not product_name and not description:
+            return self._empty_analysis()
+        
+        all_texts = []
+        
+        if product_name:
+            all_texts.append(product_name)
+        if description:
+            all_texts.append(description[:500])
+        
+        review_texts = []
+        for review in reviews_list:
+            if isinstance(review, dict):
+                text = review.get('text', '')
+                title = review.get('title', '')
+                combined = f"{title} {text}".strip()
+                if combined:
+                    review_texts.append(combined)
+                    all_texts.append(combined)
+        
+        if not all_texts:
+            return self._empty_analysis()
+        
+        results = {
+            'overall_sentiment': '',
+            'confidence': 0.0,
+            'sentiment_distribution': {},
+            'aspect_sentiments': {},
+            'key_phrases': {'positive': [], 'negative': []},
+            'review_breakdown': {'positive': 0, 'neutral': 0, 'negative': 0, 'total': len(review_texts)},
+            'recommendation_score': 0.0,
+            'summary': ''
+        }
+        
+        # Analyze overall sentiment
+        ensemble_scores = self._ensemble_sentiment(all_texts[:20])
+        results['overall_sentiment'] = ensemble_scores['label']
+        results['confidence'] = ensemble_scores['score']
+        results['sentiment_distribution'] = ensemble_scores['distribution']
+        
+        # Aspect-based sentiment
+        if review_texts:
+            results['aspect_sentiments'] = self._aspect_sentiment_analysis(review_texts)
+        
+        # Key phrases
+        results['key_phrases'] = self._extract_key_phrases(review_texts)
+        
+        # Review breakdown
+        results['review_breakdown'] = self._categorize_reviews(reviews_list)
+        
+        # Recommendation score
+        results['recommendation_score'] = self._calculate_recommendation_score(results)
+        
+        # Generate summary
+        results['summary'] = self._generate_summary(results)
+        
+        return results
+    
+    def _ensemble_sentiment(self, texts):
+        """Combine predictions from models"""
+        scores = {'positive': [], 'neutral': [], 'negative': []}
+        
+        for text in texts:
+            if not text.strip():
+                continue
+            
+            if 'distilbert' in self.models:
+                try:
+                    result = self.models['distilbert'](text[:512])[0]
+                    label = result['label'].lower()
+                    score = result['score']
+                    
+                    if label == 'positive':
+                        scores['positive'].append(score)
+                        scores['negative'].append(0)
+                    else:
+                        scores['negative'].append(score)
+                        scores['positive'].append(0)
+                except:
+                    pass
+        
+        import numpy as np
+        avg_scores = {
+            'positive': np.mean(scores['positive']) if scores['positive'] else 0,
+            'negative': np.mean(scores['negative']) if scores['negative'] else 0,
+            'neutral': np.mean(scores['neutral']) if scores['neutral'] else 0
+        }
+        
+        max_sentiment = max(avg_scores, key=avg_scores.get)
+        
+        return {
+            'label': max_sentiment,
+            'score': avg_scores[max_sentiment],
+            'distribution': avg_scores
+        }
+    
+    def _aspect_sentiment_analysis(self, review_texts):
+        """Analyze sentiment for specific product aspects"""
+        aspect_sentiments = {}
+        
+        for aspect, keywords in self.aspects.items():
+            relevant_sentences = []
+            
+            for review in review_texts:
+                sentences = re.split(r'[.!?]', review)
+                for sentence in sentences:
+                    sentence_lower = sentence.lower()
+                    if any(keyword in sentence_lower for keyword in keywords):
+                        relevant_sentences.append(sentence.strip())
+            
+            if relevant_sentences:
+                aspect_analysis = self._ensemble_sentiment(relevant_sentences[:10])
+                aspect_sentiments[aspect] = {
+                    'sentiment': aspect_analysis['label'],
+                    'confidence': aspect_analysis['score'],
+                    'mention_count': len(relevant_sentences)
+                }
+        
+        return aspect_sentiments
+    
+    def _extract_key_phrases(self, review_texts):
+        """Extract positive and negative key phrases"""
+        positive_phrases = []
+        negative_phrases = []
+        
+        positive_words = ['excellent', 'great', 'amazing', 'perfect', 'love', 'best', 
+                         'awesome', 'fantastic', 'superb', 'good', 'nice', 'happy']
+        negative_words = ['bad', 'poor', 'terrible', 'worst', 'hate', 'awful', 
+                         'disappointed', 'useless', 'waste', 'defective', 'broken']
+        
+        for review in review_texts[:20]:
+            sentences = re.split(r'[.!?]', review.lower())
+            
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if len(sentence) < 10:
+                    continue
+                
+                if any(word in sentence for word in positive_words):
+                    if len(sentence) <= 100:
+                        positive_phrases.append(sentence.capitalize())
+                elif any(word in sentence for word in negative_words):
+                    if len(sentence) <= 100:
+                        negative_phrases.append(sentence.capitalize())
+        
+        return {
+            'positive': list(set(positive_phrases))[:5],
+            'negative': list(set(negative_phrases))[:5]
+        }
+    
+    def _categorize_reviews(self, reviews_list):
+        """Categorize reviews as positive/neutral/negative"""
+        breakdown = {'positive': 0, 'neutral': 0, 'negative': 0, 'total': len(reviews_list)}
+        
+        for review in reviews_list:
+            if isinstance(review, dict):
+                rating = review.get('rating', 0)
+                if isinstance(rating, str):
+                    try:
+                        rating = float(rating.split()[0])
+                    except:
+                        rating = 0
+                
+                if rating >= 4:
+                    breakdown['positive'] += 1
+                elif rating >= 2.5:
+                    breakdown['neutral'] += 1
+                else:
+                    breakdown['negative'] += 1
+        
+        return breakdown
+    
+    def _calculate_recommendation_score(self, results):
+        """Calculate overall recommendation score (0-100)"""
+        score = 50
+        
+        if results['overall_sentiment'] == 'positive':
+            score += 30 * results['confidence']
+        elif results['overall_sentiment'] == 'negative':
+            score -= 30 * results['confidence']
+        
+        breakdown = results['review_breakdown']
+        if breakdown['total'] > 0:
+            positive_ratio = breakdown['positive'] / breakdown['total']
+            negative_ratio = breakdown['negative'] / breakdown['total']
+            score += 20 * positive_ratio - 20 * negative_ratio
+        
+        return max(0, min(100, round(score, 1)))
+    
+    def _generate_summary(self, results):
+        """Generate human-readable summary"""
+        sentiment = results['overall_sentiment'].capitalize()
+        confidence = results['confidence']
+        rec_score = results['recommendation_score']
+        
+        breakdown = results['review_breakdown']
+        total = breakdown['total']
+        
+        summary = f"Overall Sentiment: {sentiment} ({confidence:.1%} confidence). "
+        
+        if total > 0:
+            summary += f"Based on {total} reviews: {breakdown['positive']} positive, "
+            summary += f"{breakdown['neutral']} neutral, {breakdown['negative']} negative. "
+        
+        if rec_score >= 70:
+            summary += "✅ Highly Recommended"
+        elif rec_score >= 50:
+            summary += "👍 Recommended with considerations"
+        else:
+            summary += "⚠️ Consider alternatives"
+        
+        return summary
+    
+    def _empty_analysis(self):
+        """Return empty analysis structure"""
+        return {
+            'overall_sentiment': 'unknown',
+            'confidence': 0.0,
+            'sentiment_distribution': {},
+            'aspect_sentiments': {},
+            'key_phrases': {'positive': [], 'negative': []},
+            'review_breakdown': {'positive': 0, 'neutral': 0, 'negative': 0, 'total': 0},
+            'recommendation_score': 50.0,
+            'summary': 'Insufficient data for analysis'
+        }
+
 
 # ===========================
 # RAG Storage System (Enhanced)

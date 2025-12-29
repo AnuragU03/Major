@@ -20,27 +20,31 @@
 
 ### 1.1 Primary Objective
 
-To develop an **intelligent e-commerce price comparison system** that aggregates product information from multiple Indian e-commerce platforms (Amazon.in and Flipkart) and provides users with comprehensive product analysis including pricing, specifications, reviews, and **Neural Network-powered sentiment analysis using DistilBERT**.
+To develop an **intelligent e-commerce price comparison system** that aggregates product information from multiple Indian e-commerce platforms (**Amazon.in, Flipkart, Croma, and Reliance Digital**) and provides users with comprehensive product analysis including pricing, specifications, reviews, and **Neural Network-powered sentiment analysis using DistilBERT**.
 
 ### 1.2 Specific Objectives
 
 | # | Objective | Description |
 |---|-----------|-------------|
-| 1 | **Multi-Platform Product Aggregation** | Scrape and collect product data from Amazon.in and Flipkart simultaneously for unified comparison |
+| 1 | **Multi-Platform Product Aggregation** | Scrape and collect product data from **Amazon.in, Flipkart, Croma, and Reliance Digital** simultaneously for unified comparison |
 | 2 | **RAG-Based Smart Caching** | Implement Retrieval-Augmented Generation (RAG) pipeline with semantic search to cache products locally and reduce redundant scraping |
-| 3 | **Deep Product Information Extraction** | Extract comprehensive product details including technical specifications, features, customer reviews, rating breakdowns, and descriptions |
-| 4 | **Neural Network Sentiment Analysis** | Deploy DistilBERT transformer model fine-tuned on SST-2 with support for Amazon/Yelp review datasets |
+| 3 | **Deep Product Information Extraction** | Extract comprehensive product details including technical specifications, features, customer reviews (with pagination up to 50 reviews), rating breakdowns, and descriptions |
+| 4 | **Neural Network Sentiment Analysis** | Deploy DistilBERT transformer model fine-tuned on SST-2 with aspect-based sentiment analysis (quality, performance, battery, camera, display, value) |
 | 5 | **Interactive Visualization** | Provide a rich GUI interface displaying products with images, prices, specs, sentiment scores, and direct purchase links |
 | 6 | **Intelligent Product Filtering** | Automatically filter out accessories, irrelevant products, and validate product relevance to search queries |
+| 7 | **Anti-Detection Measures** | Implement StealthBrowser with randomized user agents, human-like scrolling, and rate limiting to avoid bot detection |
 
 ### 1.3 Scope Boundaries
 
 **In Scope:**
-- Amazon.in and Flipkart price comparison
+- Amazon.in, Flipkart, Croma, and Reliance Digital price comparison
 - Product specifications, reviews, and ratings extraction
+- Advanced review scraping with pagination (up to 50 reviews per product)
 - Neural Network sentiment analysis using DistilBERT (Transformer-based)
+- Aspect-based sentiment analysis (quality, performance, battery, camera, display, value)
 - Support for multiple training datasets (Amazon Polarity, Amazon Reviews 2023, Yelp Reviews)
 - Local RAG storage with semantic search
+- Anti-detection measures (StealthBrowser, RateLimiter, human-like scrolling)
 - Desktop GUI application (Tkinter)
 
 **Out of Scope:**
@@ -70,18 +74,26 @@ To develop an **intelligent e-commerce price comparison system** that aggregates
 │  └─────────────┘  └─────────────┘  └─────────────┘                  │
 └─────────────────────────────────────────────────────────────────────┘
                                    │
+     ┌─────────────────────────────────────────────────────────┐
+     │                  MULTI-AGENT SCRAPERS                   │
+     │  ┌───────────┐ ┌───────────┐ ┌───────┐ ┌───────────┐  │
+     │  │ Amazon.in │ │ Flipkart  │ │ Croma │ │ Reliance  │  │
+     │  │   Agent   │ │   Agent   │ │ Agent │ │   Agent   │  │
+     │  └───────────┘ └───────────┘ └───────┘ └───────────┘  │
+     └─────────────────────────────────────────────────────────┘
+                                   │
               ┌────────────────────┴────────────────────┐
               ▼                                         ▼
 ┌─────────────────────────┐              ┌─────────────────────────────┐
-│   ProductRAGStorage     │              │   Neural Sentiment Analyzer │
-│   - TF-IDF Vectorizer   │              │   - DistilBERT Transformer  │
-│   - Cosine Similarity   │              │   - HuggingFace Pipeline    │
-│   - Pickle Persistence  │              │   - GPU/CPU Auto-detection  │
+│   ProductRAGStorage     │              │   Enhanced Sentiment Analyzer   │
+│   - TF-IDF Vectorizer   │              │   - DistilBERT Transformer      │
+│   - Cosine Similarity   │              │   - Aspect-Based Analysis       │
+│   - Pickle Persistence  │              │   - GPU/CPU Auto-detection      │
 └─────────────────────────┘              └─────────────────────────────┘
               │                                         │
               ▼                                         ▼
 ┌─────────────────────────┐              ┌─────────────────────────────┐
-│  product_rag_db.pkl     │              │  Pre-trained Model (cached) │
+│  product_rag_db.pkl     │              │  Pre-trained Model (cached)     │
 └─────────────────────────┘              └─────────────────────────────┘
 ```
 
@@ -107,9 +119,9 @@ User Query: "Samsung Galaxy Watch"
         │ Not Found
         ▼
 ┌───────────────────────────────────┐
-│ STEP 3: External Web Scraping     │  ◄── Slow (30-60 seconds)
-│ Parallel: Amazon.in + Flipkart    │
-│ Using Selenium WebDriver          │
+│ STEP 3: External Web Scraping     │  ◄── Parallel (4 threads)
+│ Amazon.in + Flipkart + Croma +    │
+│ Reliance Digital (StealthBrowser) │
 └───────────────────────────────────┘
         │
         ▼
@@ -123,6 +135,7 @@ User Query: "Samsung Galaxy Watch"
         ▼
 ┌───────────────────────────────────┐
 │ STEP 5: Sentiment Analysis        │
+│ Enhanced multi-aspect analysis    │
 │ Analyze reviews → Score products  │
 └───────────────────────────────────┘
         │
@@ -175,15 +188,30 @@ DistilBERT (66M parameters)
 ### 2.4 Web Scraping Methodology
 
 **Anti-Bot Measures Implemented:**
-- Random User-Agent rotation
+- Random User-Agent rotation (multiple Chrome versions)
 - WebDriver flags disabled (`navigator.webdriver = undefined`)
+- Chrome automation extension disabled (`excludeSwitches: enable-automation`)
+- Blink automation features disabled (`disable-blink-features=AutomationControlled`)
 - Random delays between requests (3-10 seconds)
-- Window maximization to appear human-like
+- Human-like scrolling with randomized distances (200-800 pixels)
+- Window size randomization (1920x1080, 1366x768, 1440x900)
+- RateLimiter class to prevent IP blocks (10 requests/minute)
+- Session persistence for cookie management
 
 **Data Extraction Strategy:**
 - Multiple CSS selector fallbacks for each field
 - Tab management for product detail pages
 - Retry logic (2 attempts with 30-second timeouts)
+- Pagination support for deep review extraction (up to 50 reviews)
+
+**Supported E-Commerce Platforms:**
+
+| Platform | URL | Features |
+|----------|-----|----------|
+| Amazon.in | amazon.in | Full specs, reviews, rating breakdown |
+| Flipkart | flipkart.com | Specs, reviews, highlights |
+| Croma | croma.com | Product search, pricing |
+| Reliance Digital | reliancedigital.in | Product search, pricing |
 
 ---
 
@@ -210,14 +238,21 @@ DistilBERT (66M parameters)
 | Class/Module | File | Purpose |
 |--------------|------|---------|
 | `NeuralSentimentAnalyzer` | `neural_sentiment_analyzer.py` | DistilBERT-based sentiment analysis |
+| `EnhancedSentimentAnalyzer` | `multi_agent_scraper.py` | Multi-model analyzer with aspect-based analysis |
 | `DatasetLoader` | `neural_sentiment_analyzer.py` | Load Amazon/Yelp datasets from HuggingFace |
 | `ProductRAGStorage` | `Try.py` | RAG-based product caching with TF-IDF semantic search |
+| `AdvancedReviewScraper` | `multi_agent_scraper.py` | Deep review extraction with pagination (50+ reviews) |
+| `CromaScraper` | `multi_agent_scraper.py` | Croma.com product scraper |
+| `RelianceDigitalScraper` | `multi_agent_scraper.py` | RelianceDigital.in product scraper |
+| `StealthBrowser` | `multi_agent_scraper.py` | Anti-detection Chrome automation |
+| `RateLimiter` | `multi_agent_scraper.py` | Request rate limiting to avoid IP blocks |
+| `AmazonAgent` | `multi_agent_scraper.py` | Dedicated agent for Amazon.in scraping |
+| `FlipkartAgent` | `multi_agent_scraper.py` | Dedicated agent for Flipkart scraping |
+| `CromaAgent` | `multi_agent_scraper.py` | Dedicated agent for Croma.com scraping |
+| `RelianceAgent` | `multi_agent_scraper.py` | Dedicated agent for RelianceDigital.in scraping |
 | `SentimentAgent` | `multi_agent_scraper.py` | Agent wrapper for neural sentiment analysis |
-| `scrape_amazon_in()` | `multi_agent_scraper.py` | Amazon.in product scraper |
-| `scrape_flipkart()` | `multi_agent_scraper.py` | Flipkart product scraper |
-| `scrape_amazon_product_details()` | `multi_agent_scraper.py` | Deep extraction of Amazon product specs |
-| `scrape_flipkart_product_details()` | `multi_agent_scraper.py` | Deep extraction of Flipkart product specs |
-| `display_results_gui_with_details()` | `Try.py` | Interactive product comparison GUI |
+| `FilterAgent` | `multi_agent_scraper.py` | Product filtering and validation |
+| `GUIAgent` | `multi_agent_scraper.py` | Results display agent |
 
 ### 3.3 Neural Network Model Specifications
 
@@ -451,25 +486,45 @@ python multi_agent_scraper.py
 
 This project implements a comprehensive e-commerce price comparison system that combines:
 
-- **Web Scraping** (Selenium) for multi-platform data extraction
+- **Web Scraping** (Selenium) for multi-platform data extraction (Amazon, Flipkart, Croma, Reliance Digital)
 - **RAG Pipeline** (TF-IDF + Cosine Similarity) for smart caching
 - **Neural Network Sentiment Analysis** (DistilBERT Transformer) for accurate review analysis
+- **Aspect-Based Sentiment** for analyzing quality, performance, battery, camera, display, and value
+- **Advanced Anti-Detection** (StealthBrowser, RateLimiter, human-like scrolling)
 - **Multiple Dataset Support** (Amazon Polarity, Amazon Reviews 2023, Yelp Reviews)
 - **GUI** (Tkinter) for interactive user experience
 
-The system provides users with an intelligent way to compare products across platforms while gaining insights into customer sentiment through state-of-the-art transformer-based NLP models.
+The system provides users with an intelligent way to compare products across **4 major Indian e-commerce platforms** while gaining insights into customer sentiment through state-of-the-art transformer-based NLP models.
 
 ### Key Features
 
 | Feature | Technology | Benefit |
 |---------|------------|---------|
-| **Multi-Platform Scraping** | Selenium + Parallel Threading | Amazon.in + Flipkart in one search |
+| **Multi-Platform Scraping** | Selenium + 4 Parallel Threads | Amazon + Flipkart + Croma + Reliance Digital |
 | **Smart Caching** | TF-IDF RAG | Instant results for repeated searches |
 | **Neural Sentiment** | DistilBERT (91% accuracy) | Accurate sentiment from reviews |
+| **Aspect-Based Analysis** | EnhancedSentimentAnalyzer | Quality, performance, battery insights |
+| **Anti-Detection** | StealthBrowser + RateLimiter | Avoid bot detection and IP blocks |
+| **Deep Review Scraping** | AdvancedReviewScraper | Up to 50 reviews with pagination |
 | **Dataset Flexibility** | HuggingFace Integration | Fine-tune on custom datasets |
 | **GPU Acceleration** | PyTorch CUDA | Fast inference on GPU |
+
+### New Classes Added (December 2025)
+
+| Class | Purpose |
+|-------|---------|
+| `AdvancedReviewScraper` | Deep review extraction with pagination support |
+| `CromaScraper` | Scraper for Croma.com products |
+| `RelianceDigitalScraper` | Scraper for RelianceDigital.in products |
+| `StealthBrowser` | Anti-detection browser with stealth configuration |
+| `RateLimiter` | Request throttling to avoid IP blocks |
+| `EnhancedSentimentAnalyzer` | Multi-model sentiment with aspect-based analysis |
+| `CromaAgent` | Multi-agent wrapper for Croma scraping |
+| `RelianceAgent` | Multi-agent wrapper for Reliance Digital scraping |
+| `UnifiedProductScraper` | Master coordinator for all platforms |
 
 ---
 
 *Document updated for Major Project - December 2025*
 *Neural Network Sentiment Analysis using DistilBERT*
+*4-Platform Support: Amazon.in, Flipkart, Croma, Reliance Digital*

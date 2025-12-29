@@ -5,19 +5,30 @@ An intelligent web scraper that compares product prices across Amazon and Flipka
 ## 🌟 Features
 
 ### Core Functionality
-- **Multi-Platform Scraping**: Extracts product data from Amazon.in and Flipkart
+- **Multi-Platform Scraping**: Extracts product data from **Amazon.in, Flipkart, Croma, and Reliance Digital**
 - **Deep Product Details**: Scrapes technical specifications, ratings, reviews, and descriptions
+- **Advanced Review Extraction**: Pagination support for up to 50 reviews per product
 - **RAG-Based Caching**: Smart local database with semantic search capabilities
 - **Intelligent Filtering**: Automatically filters accessories and validates product relevance
+- **Anti-Detection Measures**: Stealth browser with human-like scrolling and rate limiting
 - **Interactive GUI**: Rich interface displaying products with images, prices, sentiment indicators, and detailed specs
 
 ### 🧠 Neural Sentiment Analysis
 - **Transformer-Based Model**: Uses DistilBERT fine-tuned on SST-2 from HuggingFace
 - **High Accuracy**: ~91% accuracy with 66M parameter transformer model
 - **Real-Time Analysis**: Analyzes product names and descriptions for sentiment
+- **Aspect-Based Analysis**: Analyzes specific aspects (quality, performance, battery, camera, display, value)
 - **Visual Indicators**: Emoji-based sentiment display (😊 Positive, 😐 Neutral, 😞 Negative)
 - **Confidence Scores**: Provides sentiment confidence percentages
 - **Batch Processing**: Efficient analysis of multiple products simultaneously
+
+### 🛡️ Advanced Scraping Features
+- **StealthBrowser**: Anti-detection Chrome automation with randomized user agents
+- **RateLimiter**: Request throttling to avoid IP blocks (10 requests/minute)
+- **SmartRetryHandler**: Intelligent retry logic with exponential backoff
+- **AdvancedReviewScraper**: Deep review extraction with pagination (up to 50 reviews)
+- **Human-Like Scrolling**: Randomized scroll patterns to mimic real users
+- **Multi-Selector Fallbacks**: Robust element detection with multiple CSS selectors
 
 ### RAG Pipeline Strategy
 1. **Local Exact Search** - Fast retrieval from cached products
@@ -116,8 +127,8 @@ python multi_agent_scraper.py
 ### Project Structure
 ```
 Major Project/
-├── Try.py                          # Single-agent application
-├── multi_agent_scraper.py          # Multi-agent application with dedicated agents
+├── Try.py                          # Single-agent application (with advanced scrapers)
+├── multi_agent_scraper.py          # Multi-agent application (4 platform support)
 ├── neural_sentiment_analyzer.py    # DistilBERT-based sentiment analysis
 ├── README.md                       # Documentation
 ├── PROJECT_DOCUMENTATION.md        # Detailed technical documentation
@@ -135,22 +146,35 @@ Major Project/
 
 **2. Neural Sentiment Analyzer**
 - `NeuralSentimentAnalyzer`: DistilBERT transformer model for sentiment analysis
+- `EnhancedSentimentAnalyzer`: Multi-model analyzer with aspect-based analysis
 - `DatasetLoader`: HuggingFace dataset loader for Amazon/Yelp reviews
 - Pre-trained on SST-2 with ~91% accuracy
 
 **3. Web Scrapers**
 - `scrape_detailed_amazon()`: Amazon.in scraper with deep product details
 - `scrape_detailed_flipkart()`: Flipkart scraper with retry logic
-- `scrape_amazon_product_details()`: Extracts technical specifications
-- `scrape_flipkart_product_details()`: Extracts product features
+- `CromaScraper`: Croma.com product scraper
+- `RelianceDigitalScraper`: RelianceDigital.in product scraper
+- `AdvancedReviewScraper`: Deep review extraction with pagination
+- `StealthBrowser`: Anti-detection browser automation
+- `RateLimiter`: Request rate limiting to avoid blocks
 
-**4. Data Processing**
+**4. Multi-Agent System**
+- `AmazonAgent`: Dedicated agent for Amazon.in scraping
+- `FlipkartAgent`: Dedicated agent for Flipkart scraping
+- `CromaAgent`: Dedicated agent for Croma.com scraping
+- `RelianceAgent`: Dedicated agent for RelianceDigital.in scraping
+- `SentimentAgent`: Neural network sentiment analysis agent
+- `FilterAgent`: Product filtering and validation agent
+- `GUIAgent`: Results display agent
+
+**5. Data Processing**
 - `unified_rag_search()`: Orchestrates search workflow
 - `filter_only_phones()`: Removes accessories for phone searches
 - `categorize_product()`: Auto-categorizes products
 - `clean_price()`: Normalizes price formats
 
-**5. GUI**
+**6. GUI**
 - `display_results_gui_with_details()`: Interactive product comparison
 - Async image loading
 - Sentiment indicators with emoji and confidence scores
@@ -167,7 +191,7 @@ Local Exact Match (cached)
     ↓ (if not found)
 Fuzzy Search (60% match)
     ↓ (if not found)
-Web Scraping (Amazon + Flipkart)
+Web Scraping (Amazon + Flipkart + Croma + Reliance Digital)
     ↓
 Validation & Filtering
     ↓
@@ -302,7 +326,10 @@ retry_attempts = 2  # Number of retries
 
 ## 🔮 Future Enhancements
 
-- [ ] Add more e-commerce platforms (Myntra, Snapdeal)
+- [x] ~~Add more e-commerce platforms (Croma, Reliance Digital)~~ ✅ **DONE**
+- [x] ~~Advanced review scraping with pagination~~ ✅ **DONE**
+- [x] ~~Anti-detection measures (StealthBrowser)~~ ✅ **DONE**
+- [x] ~~Aspect-based sentiment analysis~~ ✅ **DONE**
 - [ ] Price history tracking and alerts
 - [ ] Email notifications for price drops
 - [ ] Export to Excel/CSV with charts
