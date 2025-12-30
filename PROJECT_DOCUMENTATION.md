@@ -154,17 +154,39 @@ User Query: "Samsung Galaxy Watch"
 
 ### 2.3 Sentiment Analysis Methodology
 
-The system uses a **Neural Network-based sentiment analyzer** powered by DistilBERT, a transformer model pre-trained on SST-2 (Stanford Sentiment Treebank).
+The system uses a **Neural Network-based sentiment analyzer** powered by DistilBERT, a transformer model pre-trained on SST-2 (Stanford Sentiment Treebank). **The key innovation is extracting actual customer review TEXT (not just star ratings) for authentic sentiment analysis.**
 
 | Step | Process | Technical Details |
 |------|---------|-------------------|
 | **1. Model Loading** | Load pre-trained DistilBERT | `distilbert-base-uncased-finetuned-sst-2-english` from HuggingFace |
-| **2. Text Collection** | Gather product text | Priority: Customer Reviews > Review Summary > Description |
-| **3. Preprocessing** | Clean input text | Remove URLs, special chars, truncate to 512 tokens |
-| **4. Inference** | Run through transformer | HuggingFace sentiment-analysis pipeline |
-| **5. Score Mapping** | Convert to 3-class | POSITIVE/NEGATIVE with confidence threshold (0.6) |
-| **6. Aggregation** | Combine multiple reviews | Average scores across all analyzed texts |
-| **7. Explanation** | Generate summary | "Based on X reviews: Y positive, Z negative" |
+| **2. Review Extraction** | Scrape actual customer comments | Wait for page load (5s) + scroll to reviews section + extract text from `div.a6dZNm.mIW33x` (Flipkart) |
+| **3. Text Collection** | Gather review text | Priority: Customer Reviews (up to 5) > Review Summary > Description |
+| **4. Preprocessing** | Clean input text | Remove URLs, special chars, truncate to 512 tokens |
+| **5. Inference** | Run through transformer | HuggingFace sentiment-analysis pipeline |
+| **6. Score Mapping** | Convert to 3-class | POSITIVE/NEGATIVE with confidence threshold (0.6) |
+| **7. Aggregation** | Combine multiple reviews | Average scores across all analyzed texts |
+| **8. Explanation** | Generate summary | "Based on X reviews: Y positive, Z negative" |
+
+#### Customer Review Extraction Strategy
+
+The scraper uses a **3-method fallback approach** to reliably extract actual review comments:
+
+```
+Method 1: Direct CSS Selector Search
+├── div.a6dZNm.mIW33x (Flipkart review text)
+├── div.ZmyHeo (Alternative selector)
+└── Multiple fallback selectors
+
+Method 2: Container-Based Extraction
+├── Find review containers (div.col.EPCmJX)
+├── Extract text lines from each container
+└── Filter for review content (>30 chars, <1000 chars)
+
+Method 3: Regex Pattern Matching (Fallback)
+├── Match patterns like "Fabulous! ...", "Awesome ..."
+├── Extract text following review titles
+└── Clean and validate extracted text
+```
 
 #### Supported Training Datasets (for fine-tuning)
 
@@ -198,20 +220,27 @@ DistilBERT (66M parameters)
 - RateLimiter class to prevent IP blocks (10 requests/minute)
 - Session persistence for cookie management
 
+**Smart Page Loading Strategy:**
+- **Initial Wait**: 5 seconds for page to fully load
+- **Progressive Scrolling**: 8 scroll steps with 0.8s pause each to trigger lazy loading
+- **Reviews Section Wait**: Scroll to "Ratings & Reviews" heading + 2-3 second wait
+- **Content Verification**: Print debug output to confirm data extraction
+
 **Data Extraction Strategy:**
 - Multiple CSS selector fallbacks for each field
 - Tab management for product detail pages
 - Retry logic (2 attempts with 30-second timeouts)
 - Pagination support for deep review extraction (up to 50 reviews)
+- 3-method fallback for customer reviews (direct → container → regex)
 
 **Supported E-Commerce Platforms:**
 
 | Platform | URL | Features |
 |----------|-----|----------|
-| Amazon.in | amazon.in | Full specs, reviews, rating breakdown |
-| Flipkart | flipkart.com | Specs, reviews, highlights |
-| Croma | croma.com | Product search, pricing |
-| Reliance Digital | reliancedigital.in | Product search, pricing |
+| Amazon.in | amazon.in | Full specs, reviews, rating breakdown, customer reviews |
+| Flipkart | flipkart.com | Specs, reviews, highlights, category ratings (Camera/Battery/Display/Design), customer review text |
+| Croma | croma.com | Product search, pricing, key features, specifications |
+| Reliance Digital | reliancedigital.in | Product search (`/products?q=`), pricing, specs |
 
 ---
 
@@ -309,19 +338,32 @@ cosine_similarity(query_vector, document_vectors)
 |-------|--------|-------------|
 | `name` | Search page | Product title |
 | `price` | Search/Product page | Price in INR |
-| `rating` | Both pages | Star rating (e.g., "4.2 out of 5") |
+| `rating` | Both pages | Star rating (e.g., "4.6") |
 | `reviews` | Both pages | Review count |
 | `image_url` | Search page | Product thumbnail |
 | `product_link` | Search page | Direct URL to product |
 | `technical_details` | Product page | Dict of specifications |
 | `features` | Product page | List of feature bullets |
 | `description` | Product page | Full product description |
-| `customer_reviews` | Product page | List of top 5 reviews |
-| `rating_breakdown` | Product page | Percentage per star level |
+| `customer_reviews` | Product page | **List of actual review text** (up to 5 reviews with comment text, not just stars) |
+| `rating_breakdown` | Product page | Count per star level (5★: 2,12,393) |
+| `category_ratings` | Flipkart | Camera, Battery, Display, Design ratings |
 | `review_summary` | Product page | "Customers say" summary |
 | `sentiment` | ML Model | positive/neutral/negative |
 | `sentiment_score` | ML Model | 0.0 to 1.0 |
-| `sentiment_explanation` | ML Model | Key words driving sentiment |
+| `sentiment_source` | ML Model | "customer_reviews" or "description" |
+| `sentiment_explanation` | ML Model | "Based on X reviews: Y positive, Z negative" |
+
+#### Customer Reviews Format
+
+```python
+# Each review in customer_reviews list
+{
+    'text': 'So beautiful, so elegant, just a vowww 😍❤️',  # Actual comment text
+    'title': 'Fabulous!',  # Review title (optional)
+    'reviewer': 'Akshay Meena'  # Reviewer name (optional)
+}
+```
 
 ### 3.5 Project File Structure
 

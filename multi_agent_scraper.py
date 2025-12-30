@@ -382,7 +382,7 @@ class AdvancedReviewScraper:
 # ==========================================================
 
 class CromaScraper:
-    """Scraper for Croma.com"""
+    """Scraper for Croma.com with detailed product page extraction"""
     
     def __init__(self, driver):
         self.driver = driver
@@ -390,7 +390,7 @@ class CromaScraper:
         self.base_url = "https://www.croma.com"
     
     def search_products(self, query, max_products=10):
-        """Search for products on Croma"""
+        """Search for products on Croma with detailed info"""
         print(f"🔍 Searching Croma for: {query}")
         
         products = []
@@ -404,7 +404,7 @@ class CromaScraper:
             
             try:
                 self.wait.until(EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, ".product-item, .product, li.plp-card")
+                    (By.CSS_SELECTOR, ".product-item, .product, li.plp-card, div[class*='product']")
                 ))
             except TimeoutException:
                 print("⚠️ No products found on Croma")
@@ -421,28 +421,303 @@ class CromaScraper:
                 try:
                     elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                     if elements:
-                        product_elements = elements[:max_products]
+                        product_elements = elements[:max_products + 2]
                         print(f"✅ Found {len(product_elements)} products on Croma")
                         break
                 except:
                     continue
             
+            # First pass: extract basic info and links
+            product_links = []
             for elem in product_elements:
                 try:
                     product = self._extract_croma_product(elem)
-                    if product and product['name'] and product['price_numeric']:
-                        products.append(product)
-                        if len(products) >= max_products:
-                            break
+                    if product and product['name'] and product['price_numeric'] > 0:
+                        product_links.append(product)
                 except Exception as e:
                     continue
             
-            print(f"✅ Extracted {len(products)} products from Croma")
+            print(f"📦 Found {len(product_links)} valid Croma products")
+            
+            # Second pass: fetch detailed info from product pages
+            for i, product_data in enumerate(product_links[:max_products]):
+                try:
+                    if product_data.get('product_link'):
+                        print(f"  Fetching details for: {product_data['name'][:50]}...")
+                        
+                        # Open product in new tab
+                        self.driver.execute_script("window.open(arguments[0]);", product_data['product_link'])
+                        time.sleep(2)
+                        self.driver.switch_to.window(self.driver.window_handles[1])
+                        time.sleep(random.uniform(2, 4))
+                        
+                        # Scrape detailed info
+                        detailed_info = self._scrape_product_details()
+                        
+                        # Close tab and switch back
+                        self.driver.close()
+                        self.driver.switch_to.window(self.driver.window_handles[0])
+                        time.sleep(1)
+                        
+                        if detailed_info:
+                            product_data.update(detailed_info)
+                            print(f"    ✓ Got {len(detailed_info.get('technical_details', {}))} specs, {len(detailed_info.get('features', []))} features")
+                    
+                    products.append(product_data)
+                    
+                except Exception as e:
+                    print(f"    ✗ Error fetching details: {e}")
+                    # Make sure we're back to main window
+                    try:
+                        while len(self.driver.window_handles) > 1:
+                            self.driver.switch_to.window(self.driver.window_handles[-1])
+                            self.driver.close()
+                        self.driver.switch_to.window(self.driver.window_handles[0])
+                    except:
+                        pass
+                    # Still add the product with basic info
+                    products.append(product_data)
+            
+            print(f"✅ Extracted {len(products)} products from Croma with details")
             return products
             
         except Exception as e:
             print(f"❌ Croma scraping failed: {e}")
             return products
+    
+    def _scrape_product_details(self):
+        """Scrape detailed info from Croma product page - using actual Croma selectors"""
+        details = {
+            'technical_details': {},
+            'features': [],
+            'description': '',
+            'customer_reviews': [],
+            'rating': '',
+            'rating_breakdown': {}
+        }
+        
+        try:
+            time.sleep(random.uniform(2, 3))
+            
+            # Scroll to load all content sections
+            for _ in range(5):
+                self.driver.execute_script("window.scrollBy(0, 600);")
+                time.sleep(0.5)
+            
+            # ===== KEY FEATURES EXTRACTION =====
+            # From screenshot: div.key-features-box > h2.feature-text + ul li
+            feature_selectors = [
+                "div.key-features-box ul li",
+                ".key-features-box li",
+                "div.cp-keyfeature ul li",
+                ".pd-eligibility-wrap ul li",
+                "[class*='key-features'] li",
+                "[class*='keyfeature'] li"
+            ]
+            
+            for selector in feature_selectors:
+                try:
+                    items = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for item in items[:15]:
+                        text = item.text.strip()
+                        if text and len(text) > 5 and text not in details['features']:
+                            # Parse "Display: 6.7 inches..." format
+                            if ':' in text:
+                                parts = text.split(':', 1)
+                                key = parts[0].strip()
+                                value = parts[1].strip()
+                                if key and value:
+                                    details['technical_details'][key] = value
+                            details['features'].append(text)
+                    if details['features']:
+                        print(f"      Found {len(details['features'])} key features")
+                        break
+                except:
+                    continue
+            
+            # ===== SPECIFICATIONS EXTRACTION =====
+            # From screenshot: Sections like "MOBILE CATEGORY", "MANUFACTURER DETAILS", "PRODUCT DIMENSIONS"
+            # Structure: h3/heading for category, then key-value pairs
+            
+            # Try to expand/click specifications section
+            try:
+                spec_headers = self.driver.find_elements(By.CSS_SELECTOR, 
+                    "h2.accordian-title, [class*='accordian-title'], h2[class*='MuiTypography']")
+                for header in spec_headers:
+                    if 'specification' in header.text.lower():
+                        header.click()
+                        time.sleep(1)
+                        break
+            except:
+                pass
+            
+            # Extract specs from accordion/container sections
+            spec_container_selectors = [
+                ".cp-section.accordContainer",
+                "[class*='specification']",
+                ".container .sec-cont",
+                "[id*='specification']"
+            ]
+            
+            for container_sel in spec_container_selectors:
+                try:
+                    containers = self.driver.find_elements(By.CSS_SELECTOR, container_sel)
+                    for container in containers:
+                        # Look for key-value pairs in the container
+                        # Try flex/grid layout items
+                        text = container.text
+                        lines = text.split('\n')
+                        i = 0
+                        while i < len(lines) - 1:
+                            key = lines[i].strip()
+                            value = lines[i+1].strip() if i+1 < len(lines) else ''
+                            # Skip section headers and navigation
+                            if key and value and len(key) < 50 and len(value) < 200:
+                                if key.lower() not in ['specifications', 'overview', 'reviews', 'view more', 'view less']:
+                                    if not key.isupper() or len(key) < 30:  # Skip pure headers
+                                        details['technical_details'][key] = value
+                            i += 2
+                    if len(details['technical_details']) >= 5:
+                        break
+                except:
+                    continue
+            
+            # Also try direct div pairs (label + value)
+            try:
+                page_body = self.driver.find_element(By.TAG_NAME, "body").text
+                # Extract specific patterns
+                import re
+                spec_patterns = [
+                    (r'Mobile Type\s*\n?\s*([^\n]+)', 'Mobile Type'),
+                    (r'Mobile Design\s*\n?\s*([^\n]+)', 'Mobile Design'),
+                    (r'Brand\s*\n?\s*([^\n]+)', 'Brand'),
+                    (r'Model Series\s*\n?\s*([^\n]+)', 'Model Series'),
+                    (r'Model Number\s*\n?\s*([^\n]+)', 'Model Number'),
+                    (r'Dimensions[^:]*\s*\n?\s*([0-9.x\s]+)', 'Dimensions'),
+                    (r'Product Weight\s*\n?\s*([^\n]+)', 'Weight'),
+                    (r'Display[:\s]+([^\n]+)', 'Display'),
+                    (r'Memory[:\s]+([^\n]+)', 'Memory'),
+                    (r'Processor[:\s]+([^\n]+)', 'Processor'),
+                    (r'Camera[:\s]+([^\n]+)', 'Camera'),
+                    (r'Battery[:\s]+([^\n]+)', 'Battery'),
+                ]
+                for pattern, key in spec_patterns:
+                    if key not in details['technical_details']:
+                        match = re.search(pattern, page_body, re.IGNORECASE)
+                        if match:
+                            value = match.group(1).strip()
+                            if value and len(value) < 150:
+                                details['technical_details'][key] = value
+            except:
+                pass
+            
+            print(f"      Found {len(details['technical_details'])} specifications")
+            
+            # ===== OVERVIEW/DESCRIPTION EXTRACTION =====
+            # From screenshot: h2 "Overview" with description paragraphs
+            desc_selectors = [
+                "#review_accord h2.accordian-title + div",
+                "div[class*='overview'] p",
+                ".product-description",
+                "[class*='MuiAccordionSummary'] + div p"
+            ]
+            
+            for selector in desc_selectors:
+                try:
+                    elems = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    texts = []
+                    for elem in elems[:3]:
+                        text = elem.text.strip()
+                        if text and len(text) > 30:
+                            texts.append(text)
+                    if texts:
+                        details['description'] = ' '.join(texts)[:2000]
+                        break
+                except:
+                    continue
+            
+            # ===== REVIEWS EXTRACTION =====
+            # From screenshot: Reviews section with rating breakdown and customer reviews
+            # Rating breakdown: "5 star: 2", "4 star: 1", etc.
+            # Customer reviews with name, date, rating, text
+            
+            # Get overall rating
+            try:
+                rating_selectors = [".cp-rating", "[class*='rating']", ".overall-rating"]
+                for sel in rating_selectors:
+                    try:
+                        rating_elem = self.driver.find_element(By.CSS_SELECTOR, sel)
+                        rating_text = rating_elem.text.strip()
+                        if rating_text and any(c.isdigit() for c in rating_text):
+                            # Extract just the number like "2.8"
+                            import re
+                            match = re.search(r'(\d+\.?\d*)', rating_text)
+                            if match:
+                                details['rating'] = match.group(1)
+                                break
+                    except:
+                        continue
+            except:
+                pass
+            
+            # Get rating breakdown (5 star, 4 star, etc.)
+            try:
+                breakdown_container = self.driver.find_elements(By.CSS_SELECTOR, 
+                    "[class*='rating'] a, .star-rating a, [class*='star']")
+                for elem in breakdown_container:
+                    text = elem.text.strip().lower()
+                    for star in ['5 star', '4 star', '3 star', '2 star', '1 star']:
+                        if star in text:
+                            # Try to find the count next to it
+                            parent = elem.find_element(By.XPATH, "..")
+                            parent_text = parent.text
+                            import re
+                            match = re.search(rf'{star[0]}\s*star[:\s]*(\d+)', parent_text, re.IGNORECASE)
+                            if match:
+                                details['rating_breakdown'][f"{star[0]} Star"] = match.group(1)
+            except:
+                pass
+            
+            # Get customer reviews
+            try:
+                review_containers = self.driver.find_elements(By.CSS_SELECTOR,
+                    "[class*='review'], [class*='Review'], .customer-review")
+                
+                for container in review_containers[:10]:
+                    try:
+                        review = {}
+                        text = container.text.strip()
+                        
+                        # Look for verified purchase indicator
+                        if 'verified' in text.lower():
+                            review['verified'] = True
+                        
+                        # Try to parse review structure
+                        lines = text.split('\n')
+                        if len(lines) >= 2:
+                            # First line often has name/rating
+                            # Look for rating stars or number
+                            for line in lines:
+                                if '★' in line or 'star' in line.lower():
+                                    review['rating'] = line.strip()
+                                elif len(line) > 50:  # Likely review text
+                                    review['text'] = line.strip()
+                            
+                            if review.get('text'):
+                                details['customer_reviews'].append(review)
+                    except:
+                        continue
+                
+                if details['customer_reviews']:
+                    print(f"      Found {len(details['customer_reviews'])} customer reviews")
+            except:
+                pass
+            
+            return details
+            
+        except Exception as e:
+            print(f"    ⚠️ Error in Croma details extraction: {e}")
+            return details
     
     def _extract_croma_product(self, element):
         """Extract product data from Croma listing"""
@@ -518,7 +793,7 @@ class CromaScraper:
 # ==========================================================
 
 class RelianceDigitalScraper:
-    """Scraper for RelianceDigital.in"""
+    """Scraper for RelianceDigital.in with detailed product page extraction"""
     
     def __init__(self, driver):
         self.driver = driver
@@ -526,31 +801,41 @@ class RelianceDigitalScraper:
         self.base_url = "https://www.reliancedigital.in"
     
     def search_products(self, query, max_products=10):
-        """Search for products on Reliance Digital"""
+        """Search for products on Reliance Digital with detailed product page scraping"""
         print(f"🔍 Searching Reliance Digital for: {query}")
         
         products = []
         
         try:
-            # Updated URL format: /collection path with pagination parameters
-            formatted_query = query.lower().replace(' ', '-')
-            search_url = f"{self.base_url}/collection/{formatted_query}-mobiles?q={query.replace(' ', '+')}&page_no=1&page_size=12&page_type=number"
+            # Use /products?q= format with pagination parameters
+            search_url = f"{self.base_url}/products?q={query.replace(' ', '%20')}&page_no=1&page_size=12&page_type=number"
+            print(f"📌 Reliance Digital URL: {search_url}")
             self.driver.get(search_url)
-            time.sleep(random.uniform(3, 5))
+            time.sleep(random.uniform(4, 6))
             
             try:
                 self.wait.until(EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, ".sp, .product-card, [class*='product']")
+                    (By.CSS_SELECTOR, ".sp, .product-card, div[class*='product'], li[class*='product'], .pl__container")
                 ))
             except TimeoutException:
-                print("⚠️ No products found on Reliance Digital")
-                return products
+                # Try with search_term parameter
+                alt_search_url = f"{self.base_url}/products?q={query.replace(' ', '%20')}&search_term={query.replace(' ', '%20')}&internal_source=search_prompt&page_no=1&page_size=12&page_type=number"
+                print(f"📌 Trying alternate URL: {alt_search_url}")
+                self.driver.get(alt_search_url)
+                time.sleep(random.uniform(3, 5))
+                try:
+                    self.wait.until(EC.presence_of_element_located(
+                        (By.CSS_SELECTOR, ".sp, .product-card, div[class*='product'], li[class*='product'], .pl__container")
+                    ))
+                except TimeoutException:
+                    print("⚠️ No products found on Reliance Digital")
+                    return products
             
             for _ in range(3):
                 self.driver.execute_script("window.scrollBy(0, 800);")
                 time.sleep(random.uniform(1, 2))
             
-            product_selectors = [".sp", ".product-card", "[data-testid='product-card']"]
+            product_selectors = [".sp", ".product-card", "[data-testid='product-card']", ".pl__container"]
             
             product_elements = []
             for selector in product_selectors:
@@ -563,22 +848,298 @@ class RelianceDigitalScraper:
                 except:
                     continue
             
+            # Extract basic info and product links
+            basic_products = []
             for elem in product_elements:
                 try:
                     product = self._extract_reliance_product(elem)
-                    if product and product['name'] and product['price_numeric']:
-                        products.append(product)
-                        if len(products) >= max_products:
+                    # More lenient validation - accept if we have name (price may fail)
+                    if product and product['name']:
+                        basic_products.append(product)
+                        print(f"  ✓ Extracted: {product['name'][:50]}... Link: {bool(product.get('product_link'))}")
+                        if len(basic_products) >= max_products:
                             break
-                except:
+                except Exception as e:
+                    print(f"  ⚠️ Failed to extract Reliance product: {e}")
                     continue
             
-            print(f"✅ Extracted {len(products)} products from Reliance Digital")
+            # Now go into each product page to get detailed specifications
+            print(f"📄 Getting detailed specs from {len(basic_products)} Reliance product pages...")
+            main_window = self.driver.current_window_handle
+            
+            for i, product in enumerate(basic_products):
+                if product.get('product_link'):
+                    try:
+                        print(f"  📖 Opening Reliance product {i+1}/{len(basic_products)}: {product['name'][:40]}...")
+                        
+                        # Open product page in new tab
+                        self.driver.execute_script(f"window.open('{product['product_link']}', '_blank');")
+                        time.sleep(random.uniform(2, 4))
+                        
+                        # Switch to new tab
+                        windows = self.driver.window_handles
+                        if len(windows) > 1:
+                            self.driver.switch_to.window(windows[-1])
+                            
+                            # Get detailed info from product page
+                            detailed_info = self._scrape_product_details()
+                            
+                            # Merge detailed info
+                            if detailed_info.get('technical_details'):
+                                product['technical_details'] = detailed_info['technical_details']
+                            if detailed_info.get('features'):
+                                product['features'] = detailed_info['features']
+                            if detailed_info.get('description'):
+                                product['description'] = detailed_info['description']
+                            if detailed_info.get('rating'):
+                                product['rating'] = detailed_info['rating']
+                            if detailed_info.get('reviews'):
+                                product['reviews'] = detailed_info['reviews']
+                            if detailed_info.get('image_url') and not product.get('image_url'):
+                                product['image_url'] = detailed_info['image_url']
+                            
+                            # Close product tab
+                            self.driver.close()
+                            self.driver.switch_to.window(main_window)
+                            time.sleep(random.uniform(0.5, 1))
+                    except Exception as e:
+                        print(f"    ⚠️ Error getting Reliance product details: {e}")
+                        # Ensure we're back to main window
+                        try:
+                            self.driver.switch_to.window(main_window)
+                        except:
+                            pass
+                
+                products.append(product)
+            
+            print(f"✅ Extracted {len(products)} detailed products from Reliance Digital")
             return products
             
         except Exception as e:
             print(f"❌ Reliance Digital scraping failed: {e}")
             return products
+    
+    def _scrape_product_details(self):
+        """Scrape detailed specifications from a Reliance Digital product page"""
+        details = {
+            'technical_details': {},
+            'features': [],
+            'description': '',
+            'rating': '',
+            'reviews': '',
+            'image_url': ''
+        }
+        
+        try:
+            time.sleep(random.uniform(2, 3))
+            
+            # Scroll to load all content
+            for _ in range(4):
+                self.driver.execute_script("window.scrollBy(0, 600);")
+                time.sleep(0.5)
+            
+            # Try to click on "Specifications" tab if exists
+            try:
+                spec_tabs = self.driver.find_elements(By.CSS_SELECTOR, "[data-testid='specifications-tab'], button[contains(text(),'Specification')], .tab-specifications, [class*='spec-tab']")
+                for tab in spec_tabs:
+                    try:
+                        tab.click()
+                        time.sleep(1)
+                        break
+                    except:
+                        continue
+            except:
+                pass
+            
+            # Extract specifications from tables - try all tables on page
+            spec_selectors = [
+                ".pdp__specification table",
+                ".specifications table",
+                ".spec-table",
+                "[class*='specification'] table",
+                ".product-specs table",
+                "table.specs",
+                "#specifications table",
+                "table",
+                "[class*='Specification'] table"
+            ]
+            
+            for selector in spec_selectors:
+                try:
+                    tables = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for table in tables:
+                        rows = table.find_elements(By.CSS_SELECTOR, "tr")
+                        for row in rows:
+                            try:
+                                cells = row.find_elements(By.CSS_SELECTOR, "td, th")
+                                if len(cells) >= 2:
+                                    key = cells[0].text.strip()
+                                    value = cells[1].text.strip()
+                                    if key and value and len(key) < 100 and len(value) < 500:
+                                        # Skip navigation/menu items
+                                        if key.lower() not in ['home', 'products', 'category', 'brand']:
+                                            details['technical_details'][key] = value
+                            except:
+                                continue
+                    if len(details['technical_details']) >= 3:
+                        break
+                except:
+                    continue
+            
+            # Also try to extract from page text patterns if tables didn't work
+            if len(details['technical_details']) < 3:
+                try:
+                    page_text = self.driver.find_element(By.TAG_NAME, "body").text
+                    import re
+                    patterns = [
+                        (r'RAM[:\s]+(\d+\s*GB)', 'RAM'),
+                        (r'Internal Storage[:\s]+(\d+\s*GB)', 'Storage'),
+                        (r'Display[:\s]+([^\n]{5,50})', 'Display'),
+                        (r'Battery[:\s]+(\d+\s*mAh)', 'Battery'),
+                        (r'Processor[:\s]+([^\n]{5,50})', 'Processor'),
+                        (r'Camera[:\s]+([^\n]{5,50})', 'Camera'),
+                        (r'Operating System[:\s]+([^\n]{5,30})', 'OS'),
+                    ]
+                    for pattern, key in patterns:
+                        match = re.search(pattern, page_text, re.IGNORECASE)
+                        if match:
+                            details['technical_details'][key] = match.group(1).strip()
+                except:
+                    pass
+            
+            # Extract from spec key-value pairs
+            kv_selectors = [
+                ".pdp__specification .spec-row",
+                ".specification-row",
+                "[class*='spec-item']",
+                ".product-spec-row",
+                "[class*='specRow']",
+                "li[class*='spec']"
+            ]
+            
+            for selector in kv_selectors:
+                try:
+                    items = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for item in items:
+                        try:
+                            # Try direct key-value elements
+                            key_elem = item.find_element(By.CSS_SELECTOR, ".spec-key, .spec-label, [class*='key'], [class*='label']")
+                            value_elem = item.find_element(By.CSS_SELECTOR, ".spec-value, [class*='value']")
+                            key = key_elem.text.strip()
+                            value = value_elem.text.strip()
+                            if key and value:
+                                details['technical_details'][key] = value
+                        except:
+                            # Try parsing text
+                            text = item.text.strip()
+                            if ':' in text:
+                                parts = text.split(':', 1)
+                                if len(parts) == 2 and parts[0].strip() and parts[1].strip():
+                                    details['technical_details'][parts[0].strip()] = parts[1].strip()
+                            continue
+                except:
+                    continue
+            
+            # Extract features/highlights
+            feature_selectors = [
+                ".pdp__highlights li",
+                ".product-highlights li",
+                ".key-features li",
+                "[class*='highlight'] li",
+                ".feature-list li",
+                ".pdp__keyfeatures li",
+                "[class*='KeyFeature'] li",
+                "[class*='feature'] li"
+            ]
+            
+            for selector in feature_selectors:
+                try:
+                    items = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    for item in items:
+                        text = item.text.strip()
+                        if text and len(text) > 5 and text not in details['features']:
+                            details['features'].append(text)
+                except:
+                    continue
+            
+            # Extract description
+            desc_selectors = [
+                ".pdp__description",
+                ".product-description",
+                "[class*='description']",
+                ".pdp__overview",
+                "[class*='ProductDetail']"
+            ]
+            
+            for selector in desc_selectors:
+                try:
+                    elem = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    desc = elem.text.strip()
+                    if desc and len(desc) > 20:
+                        details['description'] = desc[:2000]
+                        break
+                except:
+                    continue
+            
+            # Extract rating
+            rating_selectors = [
+                ".pdp__rating span",
+                ".rating-value",
+                "[class*='rating'] span",
+                ".star-rating"
+            ]
+            
+            for selector in rating_selectors:
+                try:
+                    elem = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    rating = elem.text.strip()
+                    if rating and any(c.isdigit() for c in rating):
+                        details['rating'] = rating
+                        break
+                except:
+                    continue
+            
+            # Extract reviews count
+            review_selectors = [
+                ".pdp__reviews",
+                "[class*='review-count']",
+                ".rating-count"
+            ]
+            
+            for selector in review_selectors:
+                try:
+                    elem = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    reviews = elem.text.strip()
+                    if reviews:
+                        details['reviews'] = reviews
+                        break
+                except:
+                    continue
+            
+            # Get main product image
+            img_selectors = [
+                ".pdp__image img",
+                ".product-image img",
+                ".main-image img",
+                "[class*='product-img'] img"
+            ]
+            
+            for selector in img_selectors:
+                try:
+                    elem = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    src = elem.get_attribute('src') or elem.get_attribute('data-src')
+                    if src and src.startswith('http'):
+                        details['image_url'] = src
+                        break
+                except:
+                    continue
+            
+            print(f"    ✅ Got {len(details['technical_details'])} specs, {len(details['features'])} features from Reliance page")
+            
+        except Exception as e:
+            print(f"    ⚠️ Error extracting Reliance product details: {e}")
+        
+        return details
     
     def _extract_reliance_product(self, element):
         """Extract product data from Reliance Digital listing"""
@@ -599,7 +1160,7 @@ class RelianceDigitalScraper:
         }
         
         try:
-            name_selectors = [".sp__name", ".product-title", "h3", "[class*='title']"]
+            name_selectors = [".sp__name", ".product-title", "h3", "[class*='title']", ".pl__title", ".pl__name", "a[class*='product']", ".product-name"]
             for selector in name_selectors:
                 try:
                     name_elem = element.find_element(By.CSS_SELECTOR, selector)
@@ -609,14 +1170,19 @@ class RelianceDigitalScraper:
                 except:
                     continue
             
-            try:
-                link_elem = element.find_element(By.CSS_SELECTOR, "a")
-                href = link_elem.get_attribute('href')
-                product['product_link'] = href if href.startswith('http') else self.base_url + href
-            except:
-                pass
+            # Try multiple approaches to get product link
+            link_selectors = ["a[href*='/products/']", "a[href*='/p/']", "a.product-link", "a"]
+            for selector in link_selectors:
+                try:
+                    link_elem = element.find_element(By.CSS_SELECTOR, selector)
+                    href = link_elem.get_attribute('href')
+                    if href:
+                        product['product_link'] = href if href.startswith('http') else self.base_url + href
+                        break
+                except:
+                    continue
             
-            price_selectors = [".sp__price", ".product-price", "[class*='price'] span"]
+            price_selectors = [".sp__price", ".product-price", "[class*='price'] span", ".pl__amount"]
             for selector in price_selectors:
                 try:
                     price_elem = element.find_element(By.CSS_SELECTOR, selector)
@@ -1480,332 +2046,359 @@ def scrape_amazon_product_details(driver, product_url):
 
 
 def scrape_flipkart_product_details(driver, product_url):
-    """Scrape detailed information from Flipkart product page - enhanced version"""
+    """Scrape detailed information from Flipkart product page - using actual Flipkart selectors"""
     try:
         if product_url:
             driver.get(product_url)
-            time.sleep(random.uniform(3, 5))
+            print(f"      Waiting for page to fully load...")
+            time.sleep(5)  # Initial wait for page load
         
         details = {
             'technical_details': {},
             'additional_info': {},
             'description': '',
             'features': [],
-            'page_price': '',  # Price from product page
+            'page_price': '',
             'customer_reviews': [],
             'review_summary': '',
-            'rating_breakdown': {}
+            'rating_breakdown': {},
+            'rating': '',
+            'category_ratings': {}  # Camera, Battery, Display, Design ratings
         }
         
         print(f"      Searching for Flipkart product details...")
         
-        # ========== CUSTOMER REVIEWS EXTRACTION ==========
+        # Scroll slowly to load all sections including reviews
+        print(f"      Scrolling to load reviews section...")
+        for i in range(8):
+            driver.execute_script("window.scrollBy(0, 500);")
+            time.sleep(0.8)  # Wait for lazy-loaded content
+        
+        # Scroll back up a bit to the reviews section
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight * 0.5);")
+        time.sleep(2)  # Wait for reviews to render
+        
+        # Try to scroll to Ratings & Reviews section specifically
+        try:
+            # Look for "Ratings & Reviews" heading and scroll to it
+            review_heading = driver.find_element(By.XPATH, "//*[contains(text(), 'Ratings & Reviews') or contains(text(), 'Rating')]")
+            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});")
+            time.sleep(2)  # Wait after scrolling to reviews
+        except:
+            pass
+        
+        # ========== RATING EXTRACTION ==========
+        # From screenshot: span.PvbNMB contains "2,70,519 Ratings & 9,466 Reviews"
+        try:
+            rating_selectors = [
+                "span.PvbNMB",
+                "div._3LWZlK",
+                "span._1lRcqv",
+                "[class*='rating']"
+            ]
+            for sel in rating_selectors:
+                try:
+                    rating_elem = driver.find_element(By.CSS_SELECTOR, sel)
+                    rating_text = rating_elem.text.strip()
+                    if rating_text:
+                        # Extract just the numeric rating like "4.6"
+                        import re
+                        match = re.search(r'(\d+\.?\d*)\s*★?', rating_text)
+                        if match:
+                            details['rating'] = match.group(1)
+                            print(f"      Found rating: {details['rating']}")
+                            break
+                except:
+                    continue
+        except:
+            pass
+        
+        # ========== RATINGS & REVIEWS SECTION ==========
+        # From screenshot: div.KAdfFz "Ratings & Reviews" section
         print(f"      Extracting Flipkart customer reviews...")
         
-        # Get rating breakdown
+        # Get rating breakdown (5★, 4★, 3★, 2★, 1★ counts)
         try:
-            rating_bars = driver.find_elements(By.CSS_SELECTOR, "._5nfVE5, .BArk-j, ._1uJVNT")
-            for bar in rating_bars:
-                text = bar.text.strip()
-                if 'star' in text.lower() or any(c.isdigit() for c in text):
-                    # Parse "5 ★ 12,345" or similar formats
-                    parts = text.split()
-                    if len(parts) >= 2:
-                        star = parts[0] + ' star'
-                        count = parts[-1] if len(parts) > 1 else ''
-                        if count:
-                            details['rating_breakdown'][star] = count
-        except:
-            pass
-        
-        # Get review highlights/summary
-        try:
-            highlights = driver.find_elements(By.CSS_SELECTOR, "._3LsR7f, ._2o9D_1, .t-ZTKy")
-            summary_parts = []
-            for h in highlights[:5]:
-                text = h.text.strip()
-                if text and len(text) > 5:
-                    summary_parts.append(text)
-            if summary_parts:
-                details['review_summary'] = ' | '.join(summary_parts)
-                print(f"      Found review highlights")
-        except:
-            pass
-        
-        # Get customer reviews
-        try:
-            review_elements = driver.find_elements(By.CSS_SELECTOR, "div.ZmyHeo, div._27M-vq, div.t-ZTKy, div._6K-7Co")[:5]
-            for review in review_elements:
-                try:
-                    review_data = {}
-                    
-                    # Review title
-                    try:
-                        title = review.find_element(By.CSS_SELECTOR, "p._2-N8zT, ._2sc7ZR").text.strip()
-                        review_data['title'] = title
-                    except:
-                        pass
-                    
-                    # Review text
-                    try:
-                        body = review.find_element(By.CSS_SELECTOR, "div.t-ZTKy, div._6K-7Co, div.ZmyHeo").text.strip()
-                        review_data['text'] = body
-                    except:
-                        try:
-                            body = review.text.strip()
-                            if len(body) > 20:
-                                review_data['text'] = body
-                        except:
-                            pass
-                    
-                    # Review rating
-                    try:
-                        rating = review.find_element(By.CSS_SELECTOR, "div._3LWZlK, div._3LWZlK._1BLPMq").text.strip()
-                        review_data['rating'] = rating
-                    except:
-                        pass
-                    
-                    if review_data.get('text') and len(review_data['text']) > 10:
-                        details['customer_reviews'].append(review_data)
-                except:
-                    continue
-            print(f"      Found {len(details['customer_reviews'])} customer reviews")
-        except:
-            pass
-        
-        # Alternative: Look for review text in common containers
-        if not details['customer_reviews']:
-            try:
-                review_containers = driver.find_elements(By.CSS_SELECTOR, "[class*='review'], [class*='Review']")[:10]
-                for container in review_containers:
-                    text = container.text.strip()
-                    if text and len(text) > 30 and len(text) < 1000:
-                        details['customer_reviews'].append({'text': text})
-                        if len(details['customer_reviews']) >= 5:
-                            break
-            except:
-                pass
-        
-        # ========== ORIGINAL EXTRACTION ==========
-        # Try to get price from product page (useful when search page doesn't show price)
-        price_selectors = [
-            "div.Nx9bqj._4b5DiR",  # Main price on product page
-            "div._30jeq3._16Jk6d",  # Alternative price
-            "div.Nx9bqj",
-            "div._30jeq3",
-            "div._16Jk6d"
-        ]
-        
-        for sel in price_selectors:
-            try:
-                price_elem = driver.find_element(By.CSS_SELECTOR, sel)
-                price_text = price_elem.text.strip()
-                if price_text and '₹' in price_text:
-                    details['page_price'] = price_text
-                    print(f"      Found price on product page: {price_text}")
-                    break
-            except:
-                continue
-        
-        # Keywords to search for specifications
-        spec_keywords = ['specification', 'specifications', 'specs']
-        desc_keywords = ['description', 'product description', 'about']
-        detail_keywords = ['product detail', 'product details', 'details', 'product information']
-        
-        # Method 1: Find elements by searching text content for keywords
-        try:
-            all_headings = driver.find_elements(By.CSS_SELECTOR, "div, span, h1, h2, h3")
-            spec_sections = []
+            # Look for the rating bars section
+            rating_section = driver.find_elements(By.CSS_SELECTOR, "div.KAdfFz, div._1YokD2, [class*='rating']")
             
-            for heading in all_headings:
-                try:
-                    text = heading.text.strip().lower()
-                    if any(keyword in text for keyword in spec_keywords + detail_keywords):
-                        parent = heading
-                        for _ in range(3):
-                            try:
-                                parent = parent.find_element(By.XPATH, "..")
-                                rows = parent.find_elements(By.CSS_SELECTOR, "tr, li")
-                                if rows:
-                                    spec_sections.append(parent)
-                                    print(f"      Found section by keyword '{text[:30]}': {len(rows)} rows")
-                                    break
-                            except:
-                                break
-                except:
-                    continue
+            # Extract star breakdown from page text
+            page_text = driver.find_element(By.TAG_NAME, "body").text
+            import re
+            for star in ['5', '4', '3', '2', '1']:
+                # Pattern: "5 ★ 2,12,393" or "5★ 2,12,393"
+                patterns = [
+                    rf'{star}\s*★\s*([\d,]+)',
+                    rf'{star}\s*star[s]?\s*([\d,]+)',
+                ]
+                for pattern in patterns:
+                    match = re.search(pattern, page_text, re.IGNORECASE)
+                    if match:
+                        details['rating_breakdown'][f"{star} Star"] = match.group(1)
+                        break
             
-            # Extract from found sections
-            for section in spec_sections:
-                try:
-                    section_title = "Specifications"
-                    try:
-                        title_elem = section.find_element(By.CSS_SELECTOR, "div._4BJ2V\\+, div._1AtVbE, div._3dtsli, span, h3")
-                        section_title = title_elem.text.strip() or "Specifications"
-                    except:
-                        pass
-                    
-                    rows = section.find_elements(By.CSS_SELECTOR, "tr")
-                    for row in rows:
-                        try:
-                            cells = row.find_elements(By.CSS_SELECTOR, "td")
-                            if len(cells) >= 2:
-                                key = cells[0].text.strip()
-                                value = cells[1].text.strip()
-                                if key and value and len(key) < 100:
-                                    details['technical_details'][f"{section_title} - {key}"] = value
-                        except:
-                            continue
-                except:
-                    continue
-        except Exception as e:
-            print(f"      Error in keyword search: {e}")
+            if details['rating_breakdown']:
+                print(f"      Found rating breakdown: {details['rating_breakdown']}")
+        except:
+            pass
         
-        # Method 2: Try multiple CSS selectors for specification sections
-        if not details['technical_details']:
-            spec_section_selectors = [
-                "div._9V0sS6", "div.GNDEQ-", "div._1s76Cw", "div._3dtsli",
-                "div.aMraIH", "div[class*='spec']", "div[class*='detail']"
+        # Get category ratings (Camera, Battery, Display, Design)
+        try:
+            # From screenshot: boxes showing 4.6 Camera, 4.2 Battery, etc.
+            category_boxes = driver.find_elements(By.CSS_SELECTOR, 
+                "div._2d4LTz, div.vdNlyb, [class*='category-rating']")
+            
+            page_text = driver.find_element(By.TAG_NAME, "body").text
+            import re
+            categories = ['Camera', 'Battery', 'Display', 'Design', 'Performance', 'Value']
+            for cat in categories:
+                # Pattern: "4.6\nCamera" or "4.6 Camera"
+                pattern = rf'(\d+\.?\d*)\s*\n?\s*{cat}'
+                match = re.search(pattern, page_text, re.IGNORECASE)
+                if match:
+                    details['category_ratings'][cat] = match.group(1)
+            
+            if details['category_ratings']:
+                print(f"      Found category ratings: {details['category_ratings']}")
+        except:
+            pass
+        
+        # Get customer reviews - extract actual comment text for sentiment analysis
+        # From screenshot: div.a6dZNm.mIW33x contains the actual review text like "So beautiful, so elegant..."
+        print(f"      Waiting for reviews to load...")
+        time.sleep(3)  # Extra wait for reviews section
+        
+        try:
+            # METHOD 1: Direct search for review text elements (most reliable)
+            # From screenshot: The actual review text is in div.a6dZNm.mIW33x
+            review_text_selectors = [
+                "div.a6dZNm.mIW33x",      # Exact class from screenshot
+                "div.a6dZNm",              # Parent class
+                "div.ZmyHeo div",          # Review content area
+                "div.t-ZTKy",              # Alternative review text
+                "div._6K-7Co"              # Another review text class
             ]
             
-            for selector in spec_section_selectors:
+            for text_sel in review_text_selectors:
                 try:
-                    sections = driver.find_elements(By.CSS_SELECTOR, selector)
-                    if sections:
-                        print(f"      Found {len(sections)} spec sections using selector: {selector}")
-                        for section_idx, section in enumerate(sections):
-                            section_title = "Specifications"
-                            title_selectors = ["div._4BJ2V\\+", "div._1AtVbE", "div._3dtsli", "div._2RngUh", "span"]
+                    text_elements = driver.find_elements(By.CSS_SELECTOR, text_sel)
+                    print(f"      Trying selector '{text_sel}': found {len(text_elements)} elements")
+                    
+                    for elem in text_elements[:15]:
+                        try:
+                            text = elem.text.strip()
+                            # Filter: actual review text is usually 20+ chars, not UI elements
+                            if text and len(text) > 20 and len(text) < 2000:
+                                # Skip navigation/UI text
+                                skip_words = ['add to cart', 'buy now', 'login', 'sign in', 'see all', 
+                                             'read more', 'helpful', 'report', 'ratings', 'reviews']
+                                if not any(skip in text.lower()[:50] for skip in skip_words):
+                                    details['customer_reviews'].append({'text': text})
+                                    print(f"      ✓ Found review: {text[:60]}...")
+                        except:
+                            continue
+                    
+                    if len(details['customer_reviews']) >= 5:
+                        break
+                except Exception as e:
+                    continue
+            
+            # METHOD 2: Find review containers and extract text from them
+            if not details['customer_reviews']:
+                print(f"      Trying container-based extraction...")
+                container_selectors = [
+                    "div.col.EPCmJX",
+                    "div._27M-vq", 
+                    "div.row._3fWwat"
+                ]
+                
+                for container_sel in container_selectors:
+                    containers = driver.find_elements(By.CSS_SELECTOR, container_sel)[:10]
+                    for container in containers:
+                        try:
+                            # Get all text from the container
+                            full_text = container.text.strip()
+                            lines = full_text.split('\n')
                             
-                            for title_sel in title_selectors:
-                                try:
-                                    title_elem = section.find_element(By.CSS_SELECTOR, title_sel)
-                                    section_title = title_elem.text.strip()
-                                    if section_title and len(section_title) > 0 and len(section_title) < 50:
+                            # The review text is usually the longest line that's not a name/date
+                            for line in lines:
+                                line = line.strip()
+                                if len(line) > 30 and len(line) < 1000:
+                                    # Skip obvious non-review content
+                                    if not any(skip in line.lower() for skip in ['certified buyer', 'months ago', 'helpful', '★']):
+                                        details['customer_reviews'].append({'text': line})
                                         break
-                                except:
-                                    continue
-                            
-                            if not section_title:
-                                section_title = f"Section {section_idx + 1}"
-                            
-                            row_selectors = ["tr.WJdYP6", "tr._2-N8s", "li.W5FkOm", "div.row", "tr"]
-                            for row_sel in row_selectors:
-                                rows = section.find_elements(By.CSS_SELECTOR, row_sel)
-                                if rows:
-                                    print(f"        Found {len(rows)} rows using selector: {row_sel}")
-                                    for row in rows:
-                                        try:
-                                            cell_selectors = ["td.URwL2w", "td._7eSDEY", "td._2H-kL", "td._2vIOIi", "td", "li._21Ahn-"]
-                                            cells = []
-                                            for cell_sel in cell_selectors:
-                                                try:
-                                                    found_cells = row.find_elements(By.CSS_SELECTOR, cell_sel)
-                                                    if found_cells:
-                                                        cells.extend(found_cells)
-                                                        break
-                                                except:
-                                                    continue
-                                            
-                                            if len(cells) >= 2:
-                                                key = cells[0].text.strip()
-                                                value = cells[1].text.strip()
-                                                if key and value and len(key) < 100:
-                                                    details['technical_details'][f"{section_title} - {key}"] = value
-                                            elif len(cells) == 1:
-                                                text = cells[0].text.strip()
-                                                if text and len(text) > 3:
-                                                    details['features'].append(text)
-                                        except:
-                                            continue
-                                    break
-                        if details['technical_details']:
+                        except:
+                            continue
+                    
+                    if details['customer_reviews']:
+                        break
+            
+            # METHOD 3: Regex extraction from page source as fallback
+            if not details['customer_reviews']:
+                print(f"      Trying page text extraction...")
+                try:
+                    page_text = driver.find_element(By.TAG_NAME, "body").text
+                    
+                    # Look for common review patterns (sentences after star ratings)
+                    import re
+                    # Pattern: text between review indicators
+                    review_patterns = [
+                        r'Fabulous[!\s]+(.{20,200})',
+                        r'Awesome[!\s]+(.{20,200})',
+                        r'Amazing[!\s]+(.{20,200})',
+                        r'Great[!\s]+(.{20,200})',
+                        r'Good[!\s]+(.{20,200})',
+                        r'Nice[!\s]+(.{20,200})',
+                        r'Perfect[!\s]+(.{20,200})',
+                        r'Excellent[!\s]+(.{20,200})',
+                        r'Best[!\s]+(.{20,200})',
+                        r'Worth[!\s]+(.{20,200})',
+                    ]
+                    
+                    for pattern in review_patterns:
+                        matches = re.findall(pattern, page_text, re.IGNORECASE)
+                        for match in matches[:2]:
+                            if len(match) > 20:
+                                # Clean up the match
+                                clean_text = match.split('\n')[0].strip()
+                                if clean_text and len(clean_text) > 20:
+                                    details['customer_reviews'].append({'text': clean_text})
+                        
+                        if len(details['customer_reviews']) >= 5:
                             break
                 except:
-                    continue
+                    pass
+            
+            print(f"      Found {len(details['customer_reviews'])} customer reviews for sentiment analysis")
+            
+            # Print sample reviews for verification
+            for i, review in enumerate(details['customer_reviews'][:3]):
+                print(f"      Review {i+1}: {review.get('text', '')[:80]}...")
+                
+        except Exception as e:
+            print(f"      Error extracting reviews: {e}")
         
-        # Method 3: Generic table search for phone specs
-        if not details['technical_details']:
-            try:
-                tables = driver.find_elements(By.TAG_NAME, "table")
-                for table in tables:
-                    table_text = table.text.lower()
-                    if any(kw in table_text for kw in ['ram', 'storage', 'display', 'battery', 'processor', 'camera', 'screen']):
-                        rows = table.find_elements(By.TAG_NAME, "tr")
+        # ========== SPECIFICATIONS EXTRACTION ==========
+        # From screenshot: div.xdON2G "Specifications", div.d2eoIN "Other Details"
+        try:
+            spec_section_selectors = [
+                "div.xdON2G",  # Specifications container
+                "div.GNDEQ-",
+                "div._14cfVK",
+                "div[class*='specification']"
+            ]
+            
+            for container_sel in spec_section_selectors:
+                try:
+                    containers = driver.find_elements(By.CSS_SELECTOR, container_sel)
+                    for container in containers:
+                        # Get section title (e.g., "Other Details", "General")
+                        section_title = "Specifications"
+                        try:
+                            title_elem = container.find_element(By.CSS_SELECTOR, 
+                                "div.d2eoIN, div._4BJ2V\\+, [class*='title']")
+                            section_title = title_elem.text.strip()[:50] or "Specifications"
+                        except:
+                            pass
+                        
+                        # Extract table rows
+                        rows = container.find_elements(By.CSS_SELECTOR, "tr")
                         for row in rows:
                             try:
-                                cells = row.find_elements(By.TAG_NAME, "td")
+                                cells = row.find_elements(By.CSS_SELECTOR, "td")
                                 if len(cells) >= 2:
                                     key = cells[0].text.strip()
                                     value = cells[1].text.strip()
-                                    if key and value and len(key) < 100:
+                                    if key and value and len(key) < 80:
                                         details['technical_details'][key] = value
                             except:
                                 continue
-                        if details['technical_details']:
-                            break
-            except:
-                pass
+                    
+                    if len(details['technical_details']) >= 5:
+                        break
+                except:
+                    continue
+            
+            print(f"      Found {len(details['technical_details'])} specifications")
+        except:
+            pass
         
-        # Features/Highlights
-        highlight_selectors = [
-            "li._21Ahn-", "li.WJdYP6", "ul._1D2qrc li", 
-            "div._2418kt ul li", "li[class*='highlight']", "li[class*='feature']"
-        ]
-        
-        for sel in highlight_selectors:
-            try:
-                highlights = driver.find_elements(By.CSS_SELECTOR, sel)
-                if highlights:
-                    for h in highlights:
+        # ========== HIGHLIGHTS/FEATURES EXTRACTION ==========
+        # From screenshot: div.qFfOgN "Highlights" with bullet points
+        try:
+            highlight_selectors = [
+                "div._1mXcCf li",  # Highlights list
+                "div.qFfOgN li",
+                "li._21Ahn-",
+                "ul._1D2qrc li",
+                "[class*='highlight'] li"
+            ]
+            
+            for sel in highlight_selectors:
+                try:
+                    highlights = driver.find_elements(By.CSS_SELECTOR, sel)
+                    for h in highlights[:15]:
                         text = h.text.strip()
                         if text and len(text) > 5 and text not in details['features']:
                             details['features'].append(text)
                     if details['features']:
-                        print(f"      Found {len(details['features'])} features using: {sel}")
+                        print(f"      Found {len(details['features'])} highlights/features")
                         break
-            except:
-                continue
+                except:
+                    continue
+        except:
+            pass
         
-        # Description
-        desc_selectors = [
-            "div._1mXcCf", "div._2418kt", "div.yN\\+eNk", 
-            "div._2RngUh p", "div.product-description", "div[class*='description']", "div[class*='desc']"
-        ]
+        # ========== PRODUCT DESCRIPTION EXTRACTION ==========
+        # From screenshot: div.KgDEGp "Product Description" with paragraphs
+        try:
+            desc_selectors = [
+                "div.KgDEGp",  # Product Description container
+                "div.RmoJUa",  # Description text
+                "div._1mXcCf",
+                "div[class*='description']"
+            ]
+            
+            for sel in desc_selectors:
+                try:
+                    desc_elem = driver.find_element(By.CSS_SELECTOR, sel)
+                    text = desc_elem.text.strip()
+                    if text and len(text) > 50:
+                        # Clean up the description
+                        if 'Product Description' in text:
+                            text = text.replace('Product Description', '').strip()
+                        details['description'] = text[:2000]
+                        print(f"      Found product description ({len(details['description'])} chars)")
+                        break
+                except:
+                    continue
+        except:
+            pass
         
-        for sel in desc_selectors:
-            try:
-                desc_el = driver.find_element(By.CSS_SELECTOR, sel)
-                text = desc_el.text.strip()
-                if text and len(text) > 20:
-                    details['description'] = text[:1000]
-                    print(f"      Found description using: {sel}")
-                    break
-            except:
-                continue
+        # ========== PRICE EXTRACTION ==========
+        try:
+            price_selectors = [
+                "div.Nx9bqj._4b5DiR",
+                "div._30jeq3._16Jk6d",
+                "div.Nx9bqj",
+                "div._30jeq3"
+            ]
+            
+            for sel in price_selectors:
+                try:
+                    price_elem = driver.find_element(By.CSS_SELECTOR, sel)
+                    price_text = price_elem.text.strip()
+                    if price_text and '₹' in price_text:
+                        details['page_price'] = price_text
+                        print(f"      Found price: {price_text}")
+                        break
+                except:
+                    continue
+        except:
+            pass
         
-        # If no description found, search by text
-        if not details['description']:
-            try:
-                all_divs = driver.find_elements(By.TAG_NAME, "div")
-                for div in all_divs:
-                    try:
-                        div_class = div.get_attribute("class") or ""
-                        if any(kw in div_class.lower() for kw in desc_keywords):
-                            text = div.text.strip()
-                            if text and len(text) > 50 and len(text) < 2000:
-                                details['description'] = text
-                                print(f"      Found description by keyword in: {div_class[:30]}")
-                                break
-                    except:
-                        continue
-            except:
-                pass
-        
-        if not details['description'] and details['features']:
-            details['description'] = ' | '.join(details['features'])
-        
-        print(f"      Flipkart extraction complete: {len(details['technical_details'])} specs, {len(details['features'])} features")
+        print(f"      Flipkart extraction complete: {len(details['technical_details'])} specs, {len(details['features'])} features, {len(details['customer_reviews'])} reviews")
         
         return details
         
@@ -2464,9 +3057,12 @@ def display_results_gui(df: pd.DataFrame):
             
             if product_data.get('sentiment_confidence'):
                 conf = product_data['sentiment_confidence']
-                details_text += f"   Breakdown: Positive={conf.get('positive', 0):.1%}, "
-                details_text += f"Neutral={conf.get('neutral', 0):.1%}, "
-                details_text += f"Negative={conf.get('negative', 0):.1%}\n"
+                if isinstance(conf, dict):
+                    details_text += f"   Breakdown: Positive={conf.get('positive', 0):.1%}, "
+                    details_text += f"Neutral={conf.get('neutral', 0):.1%}, "
+                    details_text += f"Negative={conf.get('negative', 0):.1%}\n"
+                elif isinstance(conf, (int, float)):
+                    details_text += f"   Confidence: {conf:.1%}\n"
             
             if sentiment_explanation:
                 details_text += f"\n   🧠 Analysis: {sentiment_explanation}\n"
@@ -2484,19 +3080,21 @@ def display_results_gui(df: pd.DataFrame):
             # Customer Reviews
             if product_data.get('customer_reviews'):
                 reviews = product_data['customer_reviews']
-                details_text += f"💬 CUSTOMER REVIEWS ({len(reviews)} shown):\n" + "-"*50 + "\n"
-                for idx, review in enumerate(reviews[:5], 1):
-                    if isinstance(review, dict):
-                        if review.get('rating'):
-                            details_text += f"  ⭐ {review['rating']}\n"
-                        if review.get('title'):
-                            details_text += f"  📌 {review['title']}\n"
-                        if review.get('text'):
-                            review_text = review['text'][:300] + "..." if len(review['text']) > 300 else review['text']
-                            details_text += f"  {review_text}\n"
-                    else:
-                        details_text += f"  {str(review)[:300]}\n"
-                    details_text += "\n"
+                # Ensure reviews is a list
+                if isinstance(reviews, list) and len(reviews) > 0:
+                    details_text += f"💬 CUSTOMER REVIEWS ({len(reviews)} shown):\n" + "-"*50 + "\n"
+                    for idx, review in enumerate(reviews[:5], 1):
+                        if isinstance(review, dict):
+                            if review.get('rating'):
+                                details_text += f"  ⭐ {review['rating']}\n"
+                            if review.get('title'):
+                                details_text += f"  📌 {review['title']}\n"
+                            if review.get('text'):
+                                review_text = review['text'][:300] + "..." if len(review['text']) > 300 else review['text']
+                                details_text += f"  {review_text}\n"
+                        elif isinstance(review, str):
+                            details_text += f"  {review[:300]}\n"
+                        details_text += "\n"
             
             # Review Summary (Customers say...)
             if product_data.get('review_summary'):

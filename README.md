@@ -1,22 +1,24 @@
 # 🛍️ E-Commerce Price Comparison Tool with RAG & Neural Sentiment Analysis
 
-An intelligent web scraper that compares product prices across Amazon and Flipkart using Retrieval-Augmented Generation (RAG) for smart caching, semantic search, and **Neural Network-based Sentiment Analysis** using DistilBERT transformers.
+An intelligent web scraper that compares product prices across **4 major Indian e-commerce platforms** using Retrieval-Augmented Generation (RAG) for smart caching, semantic search, and **Neural Network-based Sentiment Analysis** powered by DistilBERT transformers.
 
 ## 🌟 Features
 
 ### Core Functionality
 - **Multi-Platform Scraping**: Extracts product data from **Amazon.in, Flipkart, Croma, and Reliance Digital**
 - **Deep Product Details**: Scrapes technical specifications, ratings, reviews, and descriptions
-- **Advanced Review Extraction**: Pagination support for up to 50 reviews per product
+- **Real Customer Reviews Extraction**: Extracts actual customer comments (not just ratings) for accurate sentiment analysis
+- **Smart Page Loading**: Intelligent scrolling and wait mechanisms to ensure all content loads properly
 - **RAG-Based Caching**: Smart local database with semantic search capabilities
 - **Intelligent Filtering**: Automatically filters accessories and validates product relevance
 - **Anti-Detection Measures**: Stealth browser with human-like scrolling and rate limiting
 - **Interactive GUI**: Rich interface displaying products with images, prices, sentiment indicators, and detailed specs
 
 ### 🧠 Neural Sentiment Analysis
+- **Customer Review-Based**: Analyzes actual customer review text for authentic sentiment (not just star ratings)
 - **Transformer-Based Model**: Uses DistilBERT fine-tuned on SST-2 from HuggingFace
 - **High Accuracy**: ~91% accuracy with 66M parameter transformer model
-- **Real-Time Analysis**: Analyzes product names and descriptions for sentiment
+- **Priority-Based Analysis**: Reviews → Description → Features (prioritizes real customer feedback)
 - **Aspect-Based Analysis**: Analyzes specific aspects (quality, performance, battery, camera, display, value)
 - **Visual Indicators**: Emoji-based sentiment display (😊 Positive, 😐 Neutral, 😞 Negative)
 - **Confidence Scores**: Provides sentiment confidence percentages
@@ -28,7 +30,9 @@ An intelligent web scraper that compares product prices across Amazon and Flipka
 - **SmartRetryHandler**: Intelligent retry logic with exponential backoff
 - **AdvancedReviewScraper**: Deep review extraction with pagination (up to 50 reviews)
 - **Human-Like Scrolling**: Randomized scroll patterns to mimic real users
-- **Multi-Selector Fallbacks**: Robust element detection with multiple CSS selectors
+- **Smart Content Loading**: Extended wait times (5-8 seconds) and progressive scrolling to load lazy content
+- **Multi-Selector Fallbacks**: Robust element detection with multiple CSS selectors per platform
+- **Platform-Specific Selectors**: Tailored CSS selectors for Amazon, Flipkart, Croma, and Reliance Digital
 
 ### RAG Pipeline Strategy
 1. **Local Exact Search** - Fast retrieval from cached products
@@ -204,17 +208,23 @@ Display Results in GUI with Sentiment
 
 ### Sentiment Analysis Pipeline
 ```
-Product Data
+Product Page Loaded
     ↓
-Text Extraction (name + description)
+Wait for Content (5s initial + scroll delays)
+    ↓
+Scroll to Reviews Section (8 steps × 0.8s)
+    ↓
+Extract Customer Review Text (not just star ratings!)
+    ↓
+Collect up to 5 Reviews with Actual Comments
     ↓
 DistilBERT Tokenization (512 max tokens)
     ↓
-Transformer Inference
+Transformer Inference (GPU/CPU auto-detect)
     ↓
-Softmax Classification
+Aggregate Sentiment Scores from All Reviews
     ↓
-Sentiment Label + Confidence Score
+Final: Sentiment Label + Confidence Score + Emoji
 ```
 
 ### Validation Logic
@@ -244,14 +254,55 @@ Sentiment Label + Confidence Score
 - Sentiment label (Positive/Negative/Neutral)
 - Confidence score (0-100%)
 - Sentiment emoji (😊/😐/😞)
-- Detailed explanation
+- Sentiment source (Customer Reviews / Product Description)
+- Detailed explanation (e.g., "Based on 5 reviews: 4 positive, 1 neutral")
+
+### Customer Reviews (for Sentiment Analysis)
+- Actual review text (not just star ratings)
+- Review title (e.g., "Fabulous!", "Awesome")
+- Reviewer name (when available)
+- Up to 5 reviews per product
 
 ### Detailed Information
 - Technical specifications (dict)
 - Additional product info (dict)
 - Features and highlights (list)
 - Full product description
+- Category ratings (Flipkart: Camera, Battery, Display, Design)
+- Rating breakdown (5★, 4★, 3★, 2★, 1★ counts)
 - Category classification
+
+## 🎯 Platform-Specific CSS Selectors
+
+### Flipkart
+| Data | CSS Selector |
+|------|--------------|
+| Rating | `span.PvbNMB`, `div._3LWZlK` |
+| Review Text | `div.a6dZNm.mIW33x` |
+| Specifications | `div.xdON2G`, `div.GNDEQ-` |
+| Description | `div.KgDEGp`, `div.RmoJUa` |
+| Highlights | `div._1mXcCf li` |
+| Category Ratings | `div._2d4LTz` (Camera, Battery, Display, Design) |
+
+### Amazon.in
+| Data | CSS Selector |
+|------|--------------|
+| Price | `span.a-price-whole` |
+| Reviews | `div.review-text-content` |
+| Specs | `table.prodDetTable`, `div#productOverview_feature_div` |
+
+### Croma
+| Data | CSS Selector |
+|------|--------------|
+| Key Features | `div.key-features-box ul li` |
+| Specifications | Accordion sections |
+| Price | `span.pdp-price` |
+
+### Reliance Digital
+| Data | CSS Selector |
+|------|--------------|
+| Products | `.sp`, `.product-card` |
+| URL Format | `/products?q={query}&page_no=1&page_size=12` |
 
 ## 🔧 Configuration
 
@@ -279,8 +330,12 @@ min_name_length = 10  # Minimum product name length
 
 **Wait Times**
 ```python
-page_load_timeout = 30  # Seconds
-retry_attempts = 2  # Number of retries
+initial_page_load = 5     # Seconds to wait for page load
+scroll_pause = 0.8        # Seconds between scroll steps
+scroll_steps = 8          # Number of scroll iterations
+reviews_section_wait = 3  # Extra wait for reviews to load
+page_load_timeout = 30    # Maximum wait for page
+retry_attempts = 2        # Number of retries on failure
 ```
 
 ## 🛡️ Error Handling
