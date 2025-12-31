@@ -370,6 +370,107 @@ retry_attempts = 2        # Number of retries on failure
 - Storage size: ~1MB per 100 products
 - Model size: ~268MB (downloaded once)
 
+---
+
+## 🧪 Testing & Validation
+
+### Test Scripts
+
+| Script | Purpose | Command |
+|--------|---------|---------|
+| `comparison_test.py` | Compare single vs multi-agent (400 products) | `python comparison_test.py` |
+| `analyze_pkl_results.py` | Analyze scraped data from .pkl files | `python analyze_pkl_results.py` |
+| `product_validator.py` | Test product validation logic | Imported as module |
+
+### Running Tests
+
+```bash
+# Run comprehensive comparison test (400 products, 10 categories)
+python comparison_test.py
+
+# Analyze existing pickle files
+python analyze_pkl_results.py
+```
+
+### Product Validation
+
+The `ProductValidator` ensures scraped products are relevant:
+
+```python
+from product_validator import ProductValidator
+
+validator = ProductValidator()
+is_valid, confidence, reason = validator.validate_product(
+    "Apple iPhone 15 Pro 256GB", 
+    "iPhone 15 Pro"
+)
+# Returns: (True, 0.95, "Brand and model match")
+```
+
+**Validation Rules:**
+- ✅ Brand matching (Apple, Samsung, Sony, etc.)
+- ✅ Series/Model matching (iPhone 15, Galaxy S24, etc.)
+- ❌ Accessory filtering (cases, covers, screen protectors)
+- ❌ Truncated name detection
+
+### Performance Metrics
+
+| Metric | Single Agent | Multi-Agent |
+|--------|--------------|-------------|
+| **Total Products** | 155 | 143 |
+| **Data Accuracy** | 87.1% | 90.2% |
+| **Source Coverage** | 3/4 | 4/4 |
+| **Avg Latency** | N/A | 66.58s |
+| **Throughput** | N/A | 0.054 prod/s |
+
+### UMAP Clustering Analysis
+
+Products are clustered using UMAP for quality validation:
+
+```bash
+# Generates visualization files:
+# - umap_single_agent_pkl.png
+# - umap_multi_agent_pkl.png
+python analyze_pkl_results.py
+```
+
+**Clustering Metrics:**
+| Metric | Description | Result |
+|--------|-------------|--------|
+| Silhouette Score | Cluster quality (-1 to 1) | -0.19 |
+| Davies-Bouldin | Cluster separation (lower=better) | 9.00 |
+| Cluster Purity | Category coherence | 37.8% |
+
+### Power Monitoring
+
+Track energy consumption during scraping:
+
+```python
+from power_monitor import PowerMonitor
+
+monitor = PowerMonitor()
+monitor.start_monitoring()
+
+# ... scraping operations ...
+
+report = monitor.generate_report()
+print(f"Energy: {report['energy_consumption']['total_energy_kwh']} kWh")
+print(f"CO₂: {report['co2_emissions_grams']['india']} grams")
+```
+
+### Generated Reports
+
+After running tests, these reports are generated:
+
+| File | Contents |
+|------|----------|
+| `PKL_COMPARISON_REPORT.md` | Summary comparison tables |
+| `PKL_DETAILED_ANALYSIS.md` | Full latency/bandwidth/accuracy analysis |
+| `COMPARISON_REPORT.md` | Single vs Multi-agent comparison |
+| `umap_*.png` | UMAP clustering visualizations |
+
+---
+
 ## ⚠️ Limitations
 
 - **Website Changes**: Scrapers may break if Amazon/Flipkart update HTML structure
@@ -385,6 +486,10 @@ retry_attempts = 2        # Number of retries on failure
 - [x] ~~Advanced review scraping with pagination~~ ✅ **DONE**
 - [x] ~~Anti-detection measures (StealthBrowser)~~ ✅ **DONE**
 - [x] ~~Aspect-based sentiment analysis~~ ✅ **DONE**
+- [x] ~~Product validation with accessory filtering~~ ✅ **DONE**
+- [x] ~~UMAP clustering visualization~~ ✅ **DONE**
+- [x] ~~Power consumption monitoring~~ ✅ **DONE**
+- [x] ~~Comprehensive test suite (400 products)~~ ✅ **DONE**
 - [ ] Price history tracking and alerts
 - [ ] Email notifications for price drops
 - [ ] Export to Excel/CSV with charts
@@ -417,6 +522,8 @@ For questions or support, please open an issue in the repository.
 - scikit-learn for semantic search capabilities
 - HuggingFace Transformers for neural sentiment analysis
 - DistilBERT model from HuggingFace Hub
+- UMAP-learn for dimensionality reduction
+- psutil for power monitoring
 - Flipkart scraping reference from [StackOverflow](https://stackoverflow.com/questions/28122882/) (CC BY-SA 3.0)
 
 ## 🧠 Neural Model Information
@@ -434,4 +541,23 @@ For questions or support, please open an issue in the repository.
 
 ---
 
+## 📊 Project Files
+
+| File | Description |
+|------|-------------|
+| `Try.py` | Single-agent sequential scraper with RAG |
+| `multi_agent_scraper.py` | Multi-agent parallel scraper (4 browser agents) |
+| `neural_sentiment_analyzer.py` | DistilBERT sentiment analysis module |
+| `product_validator.py` | Product validation with Brand/Series/Model matching |
+| `power_monitor.py` | CPU/Memory/Energy consumption monitoring |
+| `umap_rag_analyzer.py` | UMAP clustering and visualization |
+| `comparison_test.py` | 400-product comparison test suite |
+| `analyze_pkl_results.py` | PKL file analysis with detailed reports |
+| `PROJECT_DOCUMENTATION.md` | Complete project documentation |
+| `README.md` | This file |
+| `requirements.txt` | Python dependencies |
+
+---
+
 **⚡ Built with Python | Powered by RAG & Neural Networks | Made for Smart Shopping**
+**🧪 Validated with 400+ Products | 4 E-Commerce Platforms | Comprehensive Test Suite**

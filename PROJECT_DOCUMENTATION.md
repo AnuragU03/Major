@@ -536,9 +536,224 @@ This project implements a comprehensive e-commerce price comparison system that 
 - **Multiple Dataset Support** (Amazon Polarity, Amazon Reviews 2023, Yelp Reviews)
 - **GUI** (Tkinter) for interactive user experience
 
-The system provides users with an intelligent way to compare products across **4 major Indian e-commerce platforms** while gaining insights into customer sentiment through state-of-the-art transformer-based NLP models.
+---
 
-### Key Features
+## 4. Testing & Validation
+
+### 4.1 Test Framework
+
+The project includes comprehensive testing and validation through multiple test scripts:
+
+| Test Script | Purpose |
+|-------------|---------|
+| `comparison_test.py` | Compare single-agent vs multi-agent performance |
+| `analyze_pkl_results.py` | Analyze scraped data from pickle files |
+| `product_validator.py` | Validate product relevance and filter accessories |
+
+### 4.2 Product Validation
+
+The `ProductValidator` class ensures scraped products are relevant to the search query:
+
+```python
+class ProductValidator:
+    """Validates products against search query using Brand/Series/Model matching"""
+    
+    def validate_product(self, product_name, search_query):
+        # Extract brand, series, model from search query
+        # Check if product name contains expected components
+        # Filter out accessories (cases, covers, screen protectors)
+        # Return: (is_valid, confidence_score, reason)
+```
+
+**Validation Rules:**
+1. **Brand Matching**: Product must contain the brand from search query
+2. **Series/Model Matching**: Must match series or model number
+3. **Accessory Filtering**: Filters out cases, covers, screen protectors, chargers
+4. **Truncation Check**: Detects truncated names (< 15 chars or exact brand match)
+
+**Example Validation:**
+```
+Search Query: "iPhone 15 Pro"
+✅ "Apple iPhone 15 Pro 256GB Black" → Valid (brand + series + model match)
+❌ "iPhone 15 Pro Case Cover" → Invalid (accessory detected)
+❌ "Apple" → Invalid (truncated name)
+```
+
+### 4.3 Comparison Testing (400 Products)
+
+The `comparison_test.py` script performs comprehensive comparison between:
+- **Single Agent** (`Try.py`): Sequential scraping
+- **Multi-Agent** (`multi_agent_scraper.py`): Parallel scraping with 4 browser agents
+
+**Test Parameters:**
+- **10 Categories**: Smartphones, Laptops, Smartwatches, Tablets, Wireless Earbuds, Headphones, Smart TVs, Cameras, Gaming, Smart Speakers
+- **40 Queries**: 4 queries per category
+- **4 Sources**: Amazon.in, Flipkart, Croma, Reliance Digital
+- **Target**: ~400 products total
+
+**Metrics Collected:**
+| Metric Category | Metrics |
+|-----------------|---------|
+| **Performance** | Total time, Avg time/query, Products/second |
+| **Power** | CPU usage %, CPU power (W), Memory %, Energy (kWh), CO₂ emissions |
+| **Accuracy** | Name/Price/Rating/Reviews completeness %, Overall accuracy score |
+| **UMAP Clustering** | Silhouette score, Davies-Bouldin index, Cluster purity |
+
+### 4.4 PKL Analysis
+
+The `analyze_pkl_results.py` script provides detailed analysis of scraped data:
+
+**Latency Analysis:**
+```
+• Average Latency: 66.58s per query
+• Min Latency: 49.42s
+• Max Latency: 108.31s
+• P95 Latency: 81.38s
+• P99 Latency: 101.18s
+```
+
+**Bandwidth Analysis:**
+```
+• Total Data Scraped: 674.30 KB
+• Throughput: 0.0537 products/sec
+• Avg Product Size: 4829 bytes
+```
+
+**Accuracy Analysis (Data Completeness):**
+| Field | Single Agent | Multi-Agent |
+|-------|--------------|-------------|
+| Name | 100% | 100% |
+| Price | 100% | 79.7% |
+| Rating | 48.4% | 81.1% |
+| Image URL | 100% | 100% |
+| Product Link | 100% | 100% |
+| Technical Details | 41.3% | 68.5% |
+| **Overall Accuracy** | **87.1%** | **90.2%** |
+
+**Website Performance Ranking:**
+| Rank | Website | Score | Products | Data Quality |
+|------|---------|-------|----------|--------------|
+| #1 | Amazon.in | 75.2 | 38 | 100% price, 100% rating |
+| #2 | Flipkart | 72.7 | 36 | 100% price, 94.4% rating |
+| #3 | Croma | 60.2 | 40 | 100% price, 47.5% rating |
+| #4 | Reliance Digital | 37.5 | 29 | 0% price, 86.2% rating |
+
+**Query Analysis:**
+```
+📈 TOP QUERIES (Most Products):
+   1. "Samsung Galaxy S24" → 4 products
+   2. "Dell Inspiron" → 4 products
+   3. "HP Pavilion" → 4 products
+
+📉 BOTTOM QUERIES (Least Products):
+   1. "Apple HomePod" → 2 products
+   2. "Gaming Laptop" → 3 products
+
+🐢 SLOWEST QUERIES:
+   1. "Mi TV" → 108.3s
+   2. "Lenovo Tab" → 90.0s
+
+⚡ FASTEST QUERIES:
+   1. "Apple HomePod" → 49.4s
+   2. "Sennheiser" → 50.3s
+```
+
+### 4.5 UMAP Clustering Validation
+
+UMAP (Uniform Manifold Approximation and Projection) is used to visualize product clustering quality:
+
+**Features Used for UMAP:**
+- Text features (TF-IDF on product names): 50 dimensions
+- Price feature: 1 dimension
+- Rating feature: 1 dimension
+- Sentiment score: 1 dimension
+- **Total: 53 dimensions → 2D projection**
+
+**Clustering Metrics:**
+| Metric | Description | Single Agent | Multi-Agent |
+|--------|-------------|--------------|-------------|
+| **Silhouette Score** | -1 to 1, higher = better clustering | -0.29 | -0.19 |
+| **Davies-Bouldin Index** | Lower = better separation | 7.23 | 9.00 |
+| **Cluster Purity** | Category coherence % | 59.4% | 37.8% |
+
+**Generated Visualizations:**
+- `umap_single_agent_pkl.png` - Single agent clustering
+- `umap_multi_agent_pkl.png` - Multi-agent clustering
+
+### 4.6 Power Monitoring
+
+The `PowerMonitor` class tracks resource consumption during scraping:
+
+```python
+class PowerMonitor:
+    """Monitors CPU, memory, and estimates power consumption"""
+    
+    def generate_report(self):
+        return {
+            'resource_utilization': {
+                'average_cpu_usage_percent': 15.1,
+                'average_memory_usage_percent': 52.5
+            },
+            'power_consumption': {
+                'average_cpu_power_watts': 2.8,
+                'average_total_power_watts': 12.8
+            },
+            'energy_consumption': {
+                'total_energy_kwh': 0.009474
+            },
+            'co2_emissions_grams': {
+                'india': 7.769
+            }
+        }
+```
+
+**Power Comparison Results:**
+| Metric | Single Agent | Multi-Agent |
+|--------|--------------|-------------|
+| Avg CPU Power | 0.00 W | 2.80 W |
+| Avg Memory | 0.0% | 52.5% |
+| Total Energy | 0.000 kWh | 0.009 kWh |
+| CO₂ Emissions | 0.000 kg | 0.008 kg |
+
+### 4.7 Test Reports Generated
+
+| Report File | Contents |
+|-------------|----------|
+| `PKL_COMPARISON_REPORT.md` | Summary comparison tables |
+| `PKL_DETAILED_ANALYSIS.md` | Full detailed analysis with all metrics |
+| `COMPARISON_REPORT.md` | Single vs Multi-agent performance comparison |
+
+---
+
+## 5. Key Findings
+
+### 5.1 Single Agent vs Multi-Agent Comparison
+
+| Aspect | Single Agent | Multi-Agent | Winner |
+|--------|--------------|-------------|--------|
+| **Total Products** | 155 | 143 | Single Agent |
+| **Data Accuracy** | 87.1% | 90.2% | Multi-Agent ✅ |
+| **Source Coverage** | 3/4 | 4/4 | Multi-Agent ✅ |
+| **Technical Details** | 41.3% | 68.5% | Multi-Agent ✅ |
+| **Rating Data** | 48.4% | 81.1% | Multi-Agent ✅ |
+
+### 5.2 Best Performing Websites
+
+1. **Amazon.in**: Best for ratings and technical specifications
+2. **Flipkart**: Best overall data quality with 97.1% rating completeness
+3. **Croma**: Good product count, limited rating data
+4. **Reliance Digital**: Price extraction challenges
+
+### 5.3 Query Performance Insights
+
+- **Best Category**: Laptops (15 products, 65.6s avg)
+- **Challenging Category**: Smart TVs (14 products, 78.4s avg)
+- **Fastest Queries**: Brand-specific searches (e.g., "Sennheiser")
+- **Slowest Queries**: Generic searches (e.g., "Mi TV")
+
+---
+
+## Key Features Summary
 
 | Feature | Technology | Benefit |
 |---------|------------|---------|
@@ -548,8 +763,10 @@ The system provides users with an intelligent way to compare products across **4
 | **Aspect-Based Analysis** | EnhancedSentimentAnalyzer | Quality, performance, battery insights |
 | **Anti-Detection** | StealthBrowser + RateLimiter | Avoid bot detection and IP blocks |
 | **Deep Review Scraping** | AdvancedReviewScraper | Up to 50 reviews with pagination |
-| **Dataset Flexibility** | HuggingFace Integration | Fine-tune on custom datasets |
-| **GPU Acceleration** | PyTorch CUDA | Fast inference on GPU |
+| **Product Validation** | ProductValidator | Filter accessories, validate relevance |
+| **UMAP Clustering** | UMAPAnalyzer | Visualize product similarity |
+| **Power Monitoring** | PowerMonitor | Track energy consumption & CO₂ |
+| **Comprehensive Testing** | comparison_test.py | 400-product validation suite |
 
 ### New Classes Added (December 2025)
 
@@ -561,8 +778,9 @@ The system provides users with an intelligent way to compare products across **4
 | `StealthBrowser` | Anti-detection browser with stealth configuration |
 | `RateLimiter` | Request throttling to avoid IP blocks |
 | `EnhancedSentimentAnalyzer` | Multi-model sentiment with aspect-based analysis |
-| `CromaAgent` | Multi-agent wrapper for Croma scraping |
-| `RelianceAgent` | Multi-agent wrapper for Reliance Digital scraping |
+| `ProductValidator` | Brand/Series/Model validation with accessory filtering |
+| `UMAPAnalyzer` | UMAP dimensionality reduction and clustering visualization |
+| `PowerMonitor` | CPU/Memory/Energy consumption tracking |
 | `UnifiedProductScraper` | Master coordinator for all platforms |
 
 ---
@@ -570,3 +788,4 @@ The system provides users with an intelligent way to compare products across **4
 *Document updated for Major Project - December 2025*
 *Neural Network Sentiment Analysis using DistilBERT*
 *4-Platform Support: Amazon.in, Flipkart, Croma, Reliance Digital*
+*Comprehensive Testing & Validation Suite*

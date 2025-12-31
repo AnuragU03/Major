@@ -36,6 +36,30 @@ except ImportError:
     NEURAL_SENTIMENT_AVAILABLE = False
     print("⚠️ Neural sentiment analyzer not available. Run: pip install transformers torch")
 
+# Import product validator for strict Brand/Series/Model verification
+try:
+    from product_validator import ProductValidator
+    PRODUCT_VALIDATOR_AVAILABLE = True
+except ImportError:
+    PRODUCT_VALIDATOR_AVAILABLE = False
+    print("⚠️ Product validator not available. Strict model verification disabled.")
+
+# Import UMAP analyzer for clustering visualization
+try:
+    from umap_rag_analyzer import UMAPAnalyzer, RAGStorage, UMAP_AVAILABLE
+    UMAP_ANALYZER_AVAILABLE = UMAP_AVAILABLE
+except ImportError:
+    UMAP_ANALYZER_AVAILABLE = False
+    print("⚠️ UMAP analyzer not available. Run: pip install umap-learn")
+
+# Import power monitor for consumption tracking
+try:
+    from power_monitor import PowerMonitor
+    POWER_MONITOR_AVAILABLE = True
+except ImportError:
+    POWER_MONITOR_AVAILABLE = False
+    print("⚠️ Power monitor not available. Run: pip install psutil")
+
 # Import for anti-detection
 import string
 import pickle
@@ -2238,12 +2262,15 @@ def scrape_detailed_amazon(driver, product_name, max_products=5):
                 continue
             
             # Validate product matches search query (relaxed for watches)
+            # FIX: Don't skip if name is truncated to just brand (e.g., "Apple" instead of "Apple iPhone 15")
             search_tokens_lower = set(product_name.lower().split()) - {'mobile', 'phone', 'smartphone', 'the', 'a', 'an', 'best', 'new', 'latest', 'buy', 'watch', 'smart', 'smartwatch'}
             if search_tokens_lower and len(search_tokens_lower) > 0:
                 brands = ['samsung', 'apple', 'iphone', 'oneplus', 'xiaomi', 'redmi', 'realme', 'oppo', 'vivo', 'pixel', 'galaxy', 'noise', 'titan', 'boat']
                 has_brand = any(brand in product_name.lower() for brand in brands)
                 if has_brand:
-                    brand_match = any(term in name_lower for term in search_tokens_lower)
+                    # If name is just the brand (truncated), don't skip - full name is on product page
+                    is_truncated = name_lower.strip() in brands or len(name_lower.strip()) < 15
+                    brand_match = any(term in name_lower for term in search_tokens_lower) or is_truncated
                     if not brand_match:
                         print(f"    Skipping - doesn't match brand: {name[:60]}")
                         continue
@@ -2564,12 +2591,15 @@ def scrape_detailed_flipkart(driver, product_name, max_products=5):
                 continue
             
             # Validate product matches search query (relaxed for watches)
+            # FIX: Don't skip if name is truncated to just brand (e.g., "Apple" instead of "Apple iPhone 15")
             search_tokens_lower = set(product_name.lower().split()) - {'mobile', 'phone', 'smartphone', 'the', 'a', 'an', 'best', 'new', 'latest', 'buy', 'watch', 'smart', 'smartwatch'}
             if search_tokens_lower and len(search_tokens_lower) > 0:
                 brands = ['samsung', 'apple', 'iphone', 'oneplus', 'xiaomi', 'redmi', 'realme', 'oppo', 'vivo', 'pixel', 'galaxy', 'noise', 'titan', 'boat']
                 has_brand = any(brand in product_name.lower() for brand in brands)
                 if has_brand:
-                    brand_match = any(term in name_lower for term in search_tokens_lower)
+                    # If name is just the brand (truncated), don't skip - full name is on product page
+                    is_truncated = name_lower.strip() in brands or len(name_lower.strip()) < 15
+                    brand_match = any(term in name_lower for term in search_tokens_lower) or is_truncated
                     if not brand_match:
                         print(f"    Skipping - doesn't match brand: {name[:60]}")
                         continue
@@ -3073,6 +3103,32 @@ def scrape_detailed_croma(driver, product_name, max_products=5):
                     pass
                 
                 if name and price_numeric > 0:
+                    # Skip accessories - same validation as Amazon/Flipkart
+                    name_lower = name.lower()
+                    accessory_keywords = [
+                        'back cover', 'phone case', 'mobile cover', 'protective case', 
+                        'screen protector', 'tempered glass', 'screen guard', 'case for',
+                        'cover for', 'pouch', 'sleeve', 'skin for', 'charger for',
+                        'cable for', 'adapter for', 'holder for', 'stand for'
+                    ]
+                    is_accessory = any(kw in name_lower for kw in accessory_keywords)
+                    if is_accessory:
+                        print(f"    Skipping accessory: {name[:50]}")
+                        continue
+                    
+                    # Validate brand match if searching for specific brand
+                    brands = ['samsung', 'apple', 'iphone', 'oneplus', 'xiaomi', 'redmi', 'realme', 'oppo', 'vivo', 'pixel', 'galaxy', 'noise', 'titan', 'boat']
+                    search_lower = product_name.lower()
+                    has_brand_search = any(brand in search_lower for brand in brands)
+                    if has_brand_search:
+                        # At least one search term should match (brand or model)
+                        search_tokens = set(search_lower.split()) - {'mobile', 'phone', 'smartphone', 'the', 'a', 'an', 'best', 'new', 'latest', 'buy'}
+                        is_truncated = len(name_lower.strip()) < 15
+                        brand_match = any(term in name_lower for term in search_tokens) or is_truncated
+                        if not brand_match:
+                            print(f"    Skipping - doesn't match search: {name[:50]}")
+                            continue
+                    
                     product_links.append({
                         'name': name,
                         'price': price_text,
@@ -3373,6 +3429,32 @@ def scrape_detailed_reliance(driver, product_name, max_products=5):
                     pass
                 
                 if name and price_numeric > 0:
+                    # Skip accessories - same validation as Amazon/Flipkart
+                    name_lower = name.lower()
+                    accessory_keywords = [
+                        'back cover', 'phone case', 'mobile cover', 'protective case', 
+                        'screen protector', 'tempered glass', 'screen guard', 'case for',
+                        'cover for', 'pouch', 'sleeve', 'skin for', 'charger for',
+                        'cable for', 'adapter for', 'holder for', 'stand for'
+                    ]
+                    is_accessory = any(kw in name_lower for kw in accessory_keywords)
+                    if is_accessory:
+                        print(f"    Skipping accessory: {name[:50]}")
+                        continue
+                    
+                    # Validate brand match if searching for specific brand
+                    brands = ['samsung', 'apple', 'iphone', 'oneplus', 'xiaomi', 'redmi', 'realme', 'oppo', 'vivo', 'pixel', 'galaxy', 'noise', 'titan', 'boat']
+                    search_lower = product_name.lower()
+                    has_brand_search = any(brand in search_lower for brand in brands)
+                    if has_brand_search:
+                        # At least one search term should match (brand or model)
+                        search_tokens = set(search_lower.split()) - {'mobile', 'phone', 'smartphone', 'the', 'a', 'an', 'best', 'new', 'latest', 'buy'}
+                        is_truncated = len(name_lower.strip()) < 15
+                        brand_match = any(term in name_lower for term in search_tokens) or is_truncated
+                        if not brand_match:
+                            print(f"    Skipping - doesn't match search: {name[:50]}")
+                            continue
+                    
                     product_links.append({
                         'name': name,
                         'price': price_text,
@@ -4028,6 +4110,12 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
     Returns:
         DataFrame with results
     """
+    # Start power monitoring
+    power_monitor = None
+    if POWER_MONITOR_AVAILABLE:
+        power_monitor = PowerMonitor()
+        power_monitor.start_monitoring()
+    
     print(f"\n{'='*70}")
     print(f"🔍 UNIFIED RAG SEARCH".center(70))
     print(f"{'='*70}")
@@ -4127,24 +4215,37 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
     print(f"   Reliance Digital: {len(reliance_products)} products")
     print(f"   Total: {len(all_products)} products")
     
-    # Filter 1: Validate products match search query
+    # Filter 1: Validate products match search query using ProductValidator
+    # Brand + Product Line = OK (no strict verification)
+    # Series/Model Number = MUST be strictly verified
     print(f"\n🔍 Validating scraped products match search query...")
-    validated_products = []
-    for p in all_products:
-        p_name = str(p.get('name', '')).lower()
-        p_desc = str(p.get('description', '')).lower()
-        combined_text = p_name + " " + p_desc
-        if search_tokens:
-            # Check if any search token matches (more lenient)
-            match_count = sum(1 for term in search_tokens if term in combined_text)
-            if match_count >= 1:  # At least one token must match
-                validated_products.append(p)
-        else:
-            validated_products.append(p)
     
-    removed = len(all_products) - len(validated_products)
-    if removed > 0:
-        print(f"✓ Removed {removed} irrelevant products, kept {len(validated_products)} matching")
+    if PRODUCT_VALIDATOR_AVAILABLE:
+        # Use advanced ProductValidator with strict Series/Model verification
+        validator = ProductValidator()
+        validated_products, rejected_products = validator.filter_products(product_name, all_products)
+        removed = len(rejected_products)
+        if removed > 0:
+            print(f"✓ ProductValidator: Removed {removed} products with wrong Series/Model")
+            print(f"   Example: Searching 'Vivo V30' rejects 'Vivo Y100' (V≠Y) and 'Vivo V40' (30≠40)")
+    else:
+        # Fallback: Basic token matching (less strict)
+        validated_products = []
+        for p in all_products:
+            p_name = str(p.get('name', '')).lower()
+            p_desc = str(p.get('description', '')).lower()
+            combined_text = p_name + " " + p_desc
+            if search_tokens:
+                # Check if any search token matches (more lenient)
+                match_count = sum(1 for term in search_tokens if term in combined_text)
+                if match_count >= 1:  # At least one token must match
+                    validated_products.append(p)
+            else:
+                validated_products.append(p)
+        
+        removed = len(all_products) - len(validated_products)
+        if removed > 0:
+            print(f"✓ Basic filter: Removed {removed} irrelevant products, kept {len(validated_products)} matching")
     
     # If too many removed, scrape more to reach target (from all 4 sources)
     target_count = max_products * 4  # 4 sources now
@@ -4162,16 +4263,22 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
             driver.quit()
         
         extra_products = extra_amazon + extra_flipkart + extra_croma + extra_reliance
-        for p in extra_products:
-            p_name = str(p.get('name', '')).lower()
-            p_desc = str(p.get('description', '')).lower()
-            combined_text = p_name + " " + p_desc
-            if search_tokens:
-                match_count = sum(1 for term in search_tokens if term in combined_text)
-                if match_count >= 1:
-                    validated_products.append(p)
         
-        print(f"✓ Added {len(extra_products)} more products from re-scraping")
+        # Use ProductValidator for extra products too
+        if PRODUCT_VALIDATOR_AVAILABLE:
+            extra_validated, _ = validator.filter_products(product_name, extra_products)
+            validated_products.extend(extra_validated)
+            print(f"✓ Added {len(extra_validated)} more validated products from re-scraping")
+        else:
+            for p in extra_products:
+                p_name = str(p.get('name', '')).lower()
+                p_desc = str(p.get('description', '')).lower()
+                combined_text = p_name + " " + p_desc
+                if search_tokens:
+                    match_count = sum(1 for term in search_tokens if term in combined_text)
+                    if match_count >= 1:
+                        validated_products.append(p)
+            print(f"✓ Added {len(extra_products)} more products from re-scraping")
     
     all_products = validated_products
     
@@ -4230,6 +4337,31 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
     print("-"*70)
     create_detailed_report(rag_storage)
     
+    # === UMAP Clustering Visualization ===
+    if UMAP_ANALYZER_AVAILABLE and len(all_products) >= 10:
+        print(f"\n{'='*70}")
+        print("🗺️  UMAP Clustering Visualization...")
+        print("-"*70)
+        try:
+            umap_analyzer = UMAPAnalyzer(all_products)
+            umap_analyzer.prepare_features()
+            umap_analyzer.run_umap()
+            metrics = umap_analyzer.calculate_clustering_metrics()
+            
+            # Save visualization
+            from datetime import datetime
+            umap_file = f"umap_clusters_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            umap_analyzer.create_visualization(umap_file)
+            
+            print(f"✓ UMAP visualization saved: {umap_file}")
+            print(f"   Silhouette Score: {metrics.get('silhouette_score', 'N/A'):.4f}")
+            print(f"   Davies-Bouldin Index: {metrics.get('davies_bouldin_index', 'N/A'):.4f}")
+            print(f"   Cluster Purity: {metrics.get('cluster_purity', 'N/A'):.1f}%")
+        except Exception as e:
+            print(f"⚠️ UMAP visualization failed: {e}")
+    elif not UMAP_ANALYZER_AVAILABLE:
+        print("\n⚠️ UMAP not available. Install with: pip install umap-learn matplotlib")
+    
     df = pd.DataFrame(all_products)
     
     # Filter out products with 0 price before sorting
@@ -4257,6 +4389,31 @@ def unified_rag_search(product_name, rag_storage, max_products=5):
         for source in df['source'].unique():
             count = len(df[df['source'] == source])
             print(f"   {source}: {count} products")
+    
+    # === Power Consumption Report ===
+    if power_monitor:
+        print(f"\n{'='*70}")
+        print("⚡ Power Consumption Report...")
+        print("-"*70)
+        try:
+            power_monitor.record_measurement("Scraping Complete")
+            report = power_monitor.generate_report()
+            # Extract from nested structure
+            cpu_usage = report.get('resource_utilization', {}).get('average_cpu_usage_percent', 0)
+            cpu_power = report.get('power_consumption', {}).get('average_cpu_power_watts', 0)
+            mem_usage = report.get('resource_utilization', {}).get('average_memory_usage_percent', 0)
+            total_energy = report.get('energy_consumption', {}).get('total_energy_kwh', 0)
+            co2_grams = report.get('co2_emissions_grams', {}).get('india', 0)
+            duration = report.get('summary', {}).get('total_duration_seconds', 0)
+            
+            print(f"   CPU Usage (avg): {cpu_usage:.1f}%")
+            print(f"   CPU Power (avg): {cpu_power:.2f}W")
+            print(f"   Memory Usage (avg): {mem_usage:.1f}%")
+            print(f"   Total Energy: {total_energy:.6f} kWh")
+            print(f"   CO₂ Emissions: {co2_grams/1000:.6f} kg")
+            print(f"   Duration: {duration:.1f}s")
+        except Exception as e:
+            print(f"   ⚠️ Power report error: {e}")
     
     print(f"\n{'='*70}\n")
     

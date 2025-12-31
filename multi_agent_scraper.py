@@ -26,6 +26,30 @@ except ImportError:
     NEURAL_SENTIMENT_AVAILABLE = False
     print("⚠️ Neural sentiment analyzer not available. Run: pip install transformers torch")
 
+# Import product validator for strict Brand/Series/Model verification
+try:
+    from product_validator import ProductValidator
+    PRODUCT_VALIDATOR_AVAILABLE = True
+except ImportError:
+    PRODUCT_VALIDATOR_AVAILABLE = False
+    print("⚠️ Product validator not available. Strict model verification disabled.")
+
+# Import UMAP analyzer for clustering visualization
+try:
+    from umap_rag_analyzer import UMAPAnalyzer, RAGStorage, UMAP_AVAILABLE
+    UMAP_ANALYZER_AVAILABLE = UMAP_AVAILABLE
+except ImportError:
+    UMAP_ANALYZER_AVAILABLE = False
+    print("⚠️ UMAP analyzer not available. Run: pip install umap-learn")
+
+# Import power monitor for consumption tracking
+try:
+    from power_monitor import PowerMonitor
+    POWER_MONITOR_AVAILABLE = True
+except ImportError:
+    POWER_MONITOR_AVAILABLE = False
+    print("⚠️ Power monitor not available. Run: pip install psutil")
+
 # Additional imports for enhanced features
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
@@ -3267,6 +3291,12 @@ class SentimentAgent:
 
 class FilterAgent:
     def __init__(self):
+        # Initialize ProductValidator for strict Series/Model verification
+        if PRODUCT_VALIDATOR_AVAILABLE:
+            self.product_validator = ProductValidator()
+        else:
+            self.product_validator = None
+        
         # for phone queries
         self.phone_related_keywords = {
             "phone", "mobile", "smartphone", "iphone", "galaxy",
@@ -3509,6 +3539,11 @@ def multi_agent_compare_prices(product_name: str, max_products: int = 5, fetch_d
         fetch_details: If True, scrape detailed product info (slower). 
                       If False, only scrape search page (faster).
     """
+    # Start power monitoring
+    power_monitor = None
+    if POWER_MONITOR_AVAILABLE:
+        power_monitor = PowerMonitor()
+        power_monitor.start_monitoring()
     # Create browser agents for all platforms
     amazon_browser = BrowserAgent()
     flipkart_browser = BrowserAgent()
@@ -3578,6 +3613,18 @@ def multi_agent_compare_prices(product_name: str, max_products: int = 5, fetch_d
         print("No products scraped from either site.")
         return
 
+    # === STRICT PRODUCT VALIDATION ===
+    # Brand + Product Line = OK (no strict verification)
+    # Series/Model Number = MUST be strictly verified
+    # Example: Searching "Vivo V30" rejects "Vivo Y100" (V≠Y) and "Vivo V40" (30≠40)
+    if filter_agent.product_validator:
+        print(f"\n🔍 Validating products with strict Series/Model verification...")
+        before_count = len(all_products)
+        all_products, rejected = filter_agent.product_validator.filter_products(product_name, all_products)
+        removed = len(rejected)
+        if removed > 0:
+            print(f"✓ ProductValidator: Removed {removed} products with wrong Series/Model")
+    
     # Type-based filters
     if filter_agent.is_phone_query(product_name):
         all_products = filter_agent.filter_only_phones(all_products, product_name)
@@ -3605,6 +3652,57 @@ def multi_agent_compare_prices(product_name: str, max_products: int = 5, fetch_d
     print(
         f"Price range: ₹{df['price_numeric'].min():.0f} - ₹{df['price_numeric'].max():.0f}"
     )
+    
+    # === UMAP Clustering Visualization ===
+    if UMAP_ANALYZER_AVAILABLE and len(all_products) >= 10:
+        print(f"\n{'='*60}")
+        print("🗺️  UMAP Clustering Visualization...")
+        print("-"*60)
+        try:
+            umap_analyzer = UMAPAnalyzer(all_products)
+            umap_analyzer.prepare_features()
+            umap_analyzer.run_umap()
+            metrics = umap_analyzer.calculate_clustering_metrics()
+            
+            # Save visualization
+            from datetime import datetime
+            umap_file = f"umap_clusters_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            umap_analyzer.create_visualization(umap_file)
+            
+            print(f"✓ UMAP visualization saved: {umap_file}")
+            print(f"   Silhouette Score: {metrics.get('silhouette_score', 'N/A'):.4f}")
+            print(f"   Davies-Bouldin Index: {metrics.get('davies_bouldin_index', 'N/A'):.4f}")
+            print(f"   Cluster Purity: {metrics.get('cluster_purity', 'N/A'):.1f}%")
+        except Exception as e:
+            print(f"⚠️ UMAP visualization failed: {e}")
+    elif not UMAP_ANALYZER_AVAILABLE:
+        print("\n⚠️ UMAP not available. Install with: pip install umap-learn matplotlib")
+    
+    # === Power Consumption Report ===
+    if power_monitor:
+        print(f"\n{'='*60}")
+        print("⚡ Power Consumption Report...")
+        print("-"*60)
+        try:
+            power_monitor.record_measurement("Scraping Complete")
+            report = power_monitor.generate_report()
+            # Extract from nested structure
+            cpu_usage = report.get('resource_utilization', {}).get('average_cpu_usage_percent', 0)
+            cpu_power = report.get('power_consumption', {}).get('average_cpu_power_watts', 0)
+            mem_usage = report.get('resource_utilization', {}).get('average_memory_usage_percent', 0)
+            total_energy = report.get('energy_consumption', {}).get('total_energy_kwh', 0)
+            co2_grams = report.get('co2_emissions_grams', {}).get('india', 0)
+            duration = report.get('summary', {}).get('total_duration_seconds', 0)
+            
+            print(f"   CPU Usage (avg): {cpu_usage:.1f}%")
+            print(f"   CPU Power (avg): {cpu_power:.2f}W")
+            print(f"   Memory Usage (avg): {mem_usage:.1f}%")
+            print(f"   Total Energy: {total_energy:.6f} kWh")
+            print(f"   CO₂ Emissions: {co2_grams/1000:.6f} kg")
+            print(f"   Duration: {duration:.1f}s")
+        except Exception as e:
+            print(f"   ⚠️ Power report error: {e}")
+    
     print("\nOpening GUI...")
     gui_agent.show(df)
 
