@@ -318,7 +318,7 @@ def run_single_agent_test() -> Tuple[List[Dict], Dict]:
         power_monitor.start_monitoring()
     
     try:
-        from Try import unified_rag_search, ProductRAGStorage
+        from Single_Agent_Scrapper import unified_rag_search, ProductRAGStorage
     except ImportError as e:
         print(f"❌ Could not import Try.py: {e}")
         return [], {}
