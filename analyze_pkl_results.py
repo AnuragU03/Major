@@ -109,7 +109,8 @@ def perform_sentiment_analysis(products: List[Dict]) -> List[Dict]:
         if combined_text.strip() and TEXTBLOB_AVAILABLE:
             try:
                 blob = TextBlob(combined_text)
-                polarity = blob.sentiment.polarity
+                sentiment_result = blob.sentiment
+                polarity = sentiment_result.polarity  # access polarity as an attribute of the Sentiment namedtuple
                 
                 if polarity > 0.1:
                     product['sentiment_label'] = 'Positive'
@@ -206,7 +207,9 @@ def perform_umap_clustering(products: List[Dict]) -> Dict:
         # Calculate clustering metrics
         if len(set(cluster_labels)) > 1:
             umap_results['silhouette_score'] = silhouette_score(tfidf_matrix, cluster_labels)
-            umap_results['davies_bouldin_index'] = davies_bouldin_score(tfidf_matrix.toarray(), cluster_labels)
+            # Convert sparse matrix to dense array for davies_bouldin_score
+            dense_matrix = np.asarray(tfidf_matrix.todense())
+            umap_results['davies_bouldin_index'] = davies_bouldin_score(dense_matrix, cluster_labels)
         
         umap_results['n_clusters'] = n_clusters
         umap_results['method'] = 'TF-IDF + K-Means'
@@ -238,7 +241,7 @@ def perform_umap_clustering(products: List[Dict]) -> Dict:
         if UMAP_AVAILABLE:
             try:
                 reducer = umap.UMAP(n_components=2, random_state=42, n_neighbors=min(15, len(products) - 1))
-                embeddings = reducer.fit_transform(tfidf_matrix.toarray())
+                embeddings = reducer.fit_transform(dense_matrix)
                 umap_results['embeddings'] = embeddings
                 umap_results['cluster_labels'] = cluster_labels
                 umap_results['categories'] = categories
@@ -474,7 +477,8 @@ def generate_umap_and_sentiment_plots(multi_data: Dict):
     
     if price_data:
         bp = axes[1, 1].boxplot(price_data, labels=[s[:15] for s in valid_sources], patch_artist=True)
-        colors_box = plt.cm.Set3(np.linspace(0, 1, len(valid_sources)))
+        cmap = plt.colormaps.get_cmap('Set3')
+        colors_box = cmap(np.linspace(0, 1, len(valid_sources)))
         for patch, color in zip(bp['boxes'], colors_box):
             patch.set_facecolor(color)
         axes[1, 1].set_xlabel('E-Commerce Platform')

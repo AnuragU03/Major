@@ -187,7 +187,7 @@ def add_sentiment_to_products(products: List[Dict]) -> List[Dict]:
             text = ' '.join(text_parts)[:1000]
             
             if text.strip():
-                result = analyzer.analyze(text)
+                result = analyzer.analyze_sentiment(text)
                 product['sentiment'] = result.get('sentiment', 'neutral')
                 product['sentiment_score'] = result.get('score', 0.5)
                 product['sentiment_label'] = result.get('sentiment', 'neutral').capitalize()
