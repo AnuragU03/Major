@@ -4,7 +4,7 @@
 
 **Author:** Anurag U  
 **Repository:** AnuragU03/Major  
-**Date:** December 2025
+**Date:** January 2026
 
 ---
 
@@ -251,16 +251,19 @@ DistilBERT (66M parameters)
 | Component | Technology | Version |
 |-----------|------------|---------|
 | **Programming Language** | Python | 3.8+ |
-| **Web Scraping** | Selenium WebDriver | 4.38.0 |
+| **Web Scraping** | Selenium WebDriver | 4.0.0+ |
 | **Browser Automation** | Chrome + ChromeDriver | Auto-managed |
 | **Neural Networks** | PyTorch + Transformers | 2.0+, 4.35+ |
 | **Pre-trained Model** | DistilBERT (HuggingFace) | SST-2 fine-tuned |
 | **Dataset Loading** | HuggingFace Datasets | 2.14+ |
-| **Data Processing** | Pandas, NumPy | 2.3.3, 2.3.4 |
-| **Machine Learning** | scikit-learn | 1.7.2 |
+| **Data Processing** | Pandas, NumPy | 1.3+, 1.21+ |
+| **Machine Learning** | scikit-learn | 1.0+ |
 | **GUI Framework** | Tkinter | Built-in |
-| **Image Processing** | Pillow (PIL) | 12.0.0 |
-| **HTTP Requests** | Requests | 2.32.5 |
+| **Image Processing** | Pillow (PIL) | 9.0+ |
+| **HTTP Requests** | Requests | 2.26+ |
+| **Visualization** | Matplotlib, Seaborn | 3.5+, 0.11+ |
+| **Dimensionality Reduction** | UMAP-learn | 0.5+ |
+| **System Monitoring** | psutil | 5.8+ |
 
 ### 3.2 Key Classes & Modules
 
@@ -270,6 +273,12 @@ DistilBERT (66M parameters)
 | `EnhancedSentimentAnalyzer` | `multi_agent_scraper.py` | Multi-model analyzer with aspect-based analysis |
 | `DatasetLoader` | `neural_sentiment_analyzer.py` | Load Amazon/Yelp datasets from HuggingFace |
 | `ProductRAGStorage` | `Try.py` | RAG-based product caching with TF-IDF semantic search |
+| `RAGStorage` | `umap_rag_analyzer.py` | Generic RAG storage with TF-IDF vectorization |
+| `UMAPAnalyzer` | `umap_rag_analyzer.py` | UMAP dimensionality reduction and clustering visualization |
+| `ProductValidator` | `product_validator.py` | Brand/Series/Model validation with accessory filtering |
+| `ProductValidation` | `product_validator.py` | Dataclass for validation results |
+| `PowerMonitor` | `power_monitor.py` | CPU/Memory/Energy consumption tracking |
+| `Measurement` | `power_monitor.py` | Dataclass for power measurements |
 | `AdvancedReviewScraper` | `multi_agent_scraper.py` | Deep review extraction with pagination (50+ reviews) |
 | `CromaScraper` | `multi_agent_scraper.py` | Croma.com product scraper |
 | `RelianceDigitalScraper` | `multi_agent_scraper.py` | RelianceDigital.in product scraper |
@@ -768,7 +777,7 @@ class PowerMonitor:
 | **Power Monitoring** | PowerMonitor | Track energy consumption & CO₂ |
 | **Comprehensive Testing** | comparison_test.py | 400-product validation suite |
 
-### New Classes Added (December 2025)
+### New Classes Added (January 2026)
 
 | Class | Purpose |
 |-------|---------|
@@ -785,7 +794,7 @@ class PowerMonitor:
 
 ---
 
-*Document updated for Major Project - December 2025*
+*Document updated for Major Project - January 2026*
 *Neural Network Sentiment Analysis using DistilBERT*
 *4-Platform Support: Amazon.in, Flipkart, Croma, Reliance Digital*
 *Comprehensive Testing & Validation Suite*

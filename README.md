@@ -54,6 +54,10 @@ webdriver-manager>=3.8.0
 transformers>=4.35.0
 torch>=2.0.0
 datasets>=2.14.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
+umap-learn>=0.5.0
+psutil>=5.8.0
 ```
 
 ### System Requirements
@@ -74,13 +78,12 @@ cd "Major Project"
 
 2. **Install dependencies**
 ```bash
-pip install selenium pandas scikit-learn numpy Pillow requests webdriver-manager transformers torch datasets
+pip install selenium pandas scikit-learn numpy Pillow requests webdriver-manager transformers torch datasets matplotlib seaborn umap-learn psutil
 ```
 
 Or use requirements.txt:
 ```bash
 pip install -r requirements.txt
-```
 ```
 
 3. **Run the application**
@@ -134,36 +137,54 @@ Major Project/
 ├── Try.py                          # Single-agent application (with advanced scrapers)
 ├── multi_agent_scraper.py          # Multi-agent application (4 platform support)
 ├── neural_sentiment_analyzer.py    # DistilBERT-based sentiment analysis
+├── product_validator.py            # Product validation (Brand/Series/Model matching)
+├── power_monitor.py                # CPU/Memory/Energy consumption monitoring
+├── umap_rag_analyzer.py            # UMAP clustering and RAG storage visualization
+├── comparison_test.py              # 400-product comparison test suite
+├── analyze_pkl_results.py          # PKL file analysis with detailed reports
 ├── README.md                       # Documentation
 ├── PROJECT_DOCUMENTATION.md        # Detailed technical documentation
+├── CHAPTER_5_RESULTS.md            # Chapter 5 results and analysis
+├── CHAPTER5_GUIDE.md               # Guide for Chapter 5 report generation
 ├── requirements.txt                # Python dependencies
 ├── product_rag_database.pkl        # RAG storage (auto-generated)
-└── knowledge_base.json             # Optional LLM enrichment data
+└── __pycache__/                    # Python cache files
 ```
 
 ### Key Components
 
-**1. RAG Pipeline**
-- `RAGPipeline`: Generic retrieval-augmented generation system
+**1. RAG Pipeline** (`umap_rag_analyzer.py`)
+- `RAGStorage`: Generic retrieval-augmented generation storage system
+- `UMAPAnalyzer`: UMAP dimensionality reduction and clustering visualization
 - `ProductRAGStorage`: Product-specific storage with TF-IDF vectorization
 - Semantic search using cosine similarity
 
-**2. Neural Sentiment Analyzer**
+**2. Neural Sentiment Analyzer** (`neural_sentiment_analyzer.py`)
 - `NeuralSentimentAnalyzer`: DistilBERT transformer model for sentiment analysis
 - `EnhancedSentimentAnalyzer`: Multi-model analyzer with aspect-based analysis
 - `DatasetLoader`: HuggingFace dataset loader for Amazon/Yelp reviews
 - Pre-trained on SST-2 with ~91% accuracy
 
-**3. Web Scrapers**
+**3. Product Validator** (`product_validator.py`)
+- `ProductValidator`: Brand/Series/Model validation with accessory filtering
+- `ProductValidation`: Dataclass for validation results
+- Handles all major smartphone and electronics brands
+
+**4. Power Monitor** (`power_monitor.py`)
+- `PowerMonitor`: CPU/Memory/Energy consumption tracking
+- `Measurement`: Dataclass for power measurements
+- CO₂ emissions calculation for different regions
+
+**5. Web Scrapers** (`multi_agent_scraper.py`)
 - `scrape_detailed_amazon()`: Amazon.in scraper with deep product details
 - `scrape_detailed_flipkart()`: Flipkart scraper with retry logic
 - `CromaScraper`: Croma.com product scraper
 - `RelianceDigitalScraper`: RelianceDigital.in product scraper
-- `AdvancedReviewScraper`: Deep review extraction with pagination
+- `AdvancedReviewScraper`: Deep review extraction with pagination (up to 50 reviews)
 - `StealthBrowser`: Anti-detection browser automation
 - `RateLimiter`: Request rate limiting to avoid blocks
 
-**4. Multi-Agent System**
+**6. Multi-Agent System** (`multi_agent_scraper.py`)
 - `AmazonAgent`: Dedicated agent for Amazon.in scraping
 - `FlipkartAgent`: Dedicated agent for Flipkart scraping
 - `CromaAgent`: Dedicated agent for Croma.com scraping
@@ -171,6 +192,10 @@ Major Project/
 - `SentimentAgent`: Neural network sentiment analysis agent
 - `FilterAgent`: Product filtering and validation agent
 - `GUIAgent`: Results display agent
+
+**7. Testing & Analysis**
+- `comparison_test.py`: 400-product comprehensive test suite
+- `analyze_pkl_results.py`: PKL analysis with Chapter 5 report generation
 
 **5. Data Processing**
 - `unified_rag_search()`: Orchestrates search workflow
@@ -550,10 +575,12 @@ For questions or support, please open an issue in the repository.
 | `neural_sentiment_analyzer.py` | DistilBERT sentiment analysis module |
 | `product_validator.py` | Product validation with Brand/Series/Model matching |
 | `power_monitor.py` | CPU/Memory/Energy consumption monitoring |
-| `umap_rag_analyzer.py` | UMAP clustering and visualization |
+| `umap_rag_analyzer.py` | UMAP clustering, RAG storage, and visualization |
 | `comparison_test.py` | 400-product comparison test suite |
-| `analyze_pkl_results.py` | PKL file analysis with detailed reports |
-| `PROJECT_DOCUMENTATION.md` | Complete project documentation |
+| `analyze_pkl_results.py` | PKL file analysis with Chapter 5 reports |
+| `CHAPTER_5_RESULTS.md` | Generated Chapter 5 results and analysis |
+| `CHAPTER5_GUIDE.md` | Guide for Chapter 5 report generation |
+| `PROJECT_DOCUMENTATION.md` | Complete technical documentation |
 | `README.md` | This file |
 | `requirements.txt` | Python dependencies |
 

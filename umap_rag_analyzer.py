@@ -123,7 +123,7 @@ class RAGStorage:
         if not self.metadata['created_at']:
             self.metadata['created_at'] = self.metadata['last_updated']
     
-    def search(self, query: str, top_k: int = 10, category: str = None) -> List[Dict]:
+    def search(self, query: str, top_k: int = 10, category: Optional[str] = None) -> List[Dict]:
         """
         Search for products using semantic similarity.
         
