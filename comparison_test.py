@@ -21,9 +21,18 @@ import os
 import sys
 from threading import Thread
 from typing import Dict, List, Any, Optional, Tuple
+import concurrent.futures
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
 
-# Test Configuration - 10 Categories with 4 queries each
-CATEGORIES = [
+# ==========================================================
+# TEST CONFIGURATIONS
+# ==========================================================
+
+# Test Configuration - 10 Categories with 4 queries each (Standard)
+CATEGORIES_STANDARD = [
     ("Smartphones", ["iPhone 15", "Samsung Galaxy S24", "OnePlus 12", "Pixel 8"]),
     ("Laptops", ["Dell Inspiron", "HP Pavilion", "Lenovo ThinkPad", "MacBook Air"]),
     ("Smartwatches", ["Apple Watch Series 9", "Samsung Galaxy Watch", "Noise ColorFit", "Boat Storm"]),
@@ -36,21 +45,88 @@ CATEGORIES = [
     ("Smart Speakers", ["Amazon Echo", "Google Nest", "Apple HomePod", "JBL Flip"]),
 ]
 
+# Large Categories Test - Extended queries for popular categories (Smartphones, Laptops, etc.)
+CATEGORIES_LARGE = [
+    ("Smartphones", [
+        "iPhone 15 Pro Max", "iPhone 15 Pro", "iPhone 15", "iPhone 14",
+        "Samsung Galaxy S24 Ultra", "Samsung Galaxy S24+", "Samsung Galaxy S24", "Samsung Galaxy A54",
+        "OnePlus 12", "OnePlus 12R", "OnePlus Nord 4", "OnePlus Nord CE 4",
+        "Google Pixel 8 Pro", "Google Pixel 8", "Google Pixel 7a",
+        "Xiaomi 14", "Redmi Note 13 Pro+", "Redmi Note 13", "Poco X6 Pro",
+        "Vivo V30 Pro", "Vivo V30", "Oppo Reno 11 Pro", "Realme GT 5 Pro", "Nothing Phone 2"
+    ]),
+    ("Laptops", [
+        "MacBook Air M3", "MacBook Pro 14 M3", "MacBook Pro 16 M3",
+        "Dell XPS 15", "Dell XPS 13", "Dell Inspiron 15", "Dell Latitude 5540",
+        "HP Spectre x360", "HP Pavilion 15", "HP Envy x360", "HP Victus Gaming",
+        "Lenovo ThinkPad X1 Carbon", "Lenovo ThinkPad E14", "Lenovo IdeaPad Slim 5", "Lenovo Legion 5",
+        "ASUS ROG Zephyrus G14", "ASUS VivoBook 15", "ASUS TUF Gaming F15",
+        "Acer Nitro 5", "Acer Aspire 7", "MSI Gaming Laptop", "Microsoft Surface Laptop 5"
+    ]),
+    ("Tablets", [
+        "iPad Pro 12.9", "iPad Pro 11", "iPad Air M2", "iPad 10th Gen", "iPad Mini 6",
+        "Samsung Galaxy Tab S9 Ultra", "Samsung Galaxy Tab S9+", "Samsung Galaxy Tab S9", "Samsung Galaxy Tab A9",
+        "OnePlus Pad", "Xiaomi Pad 6", "Redmi Pad SE", "Lenovo Tab P12 Pro",
+        "Amazon Fire HD 10", "Microsoft Surface Pro 9"
+    ]),
+    ("Smartwatches", [
+        "Apple Watch Ultra 2", "Apple Watch Series 9", "Apple Watch SE 2",
+        "Samsung Galaxy Watch 6 Classic", "Samsung Galaxy Watch 6", "Samsung Galaxy Watch 5",
+        "Google Pixel Watch 2", "Garmin Venu 3", "Garmin Fenix 7",
+        "Amazfit GTR 4", "Amazfit Balance", "Noise ColorFit Pro 5", "Boat Wave Prime"
+    ]),
+    ("Wireless Earbuds", [
+        "Apple AirPods Pro 2", "Apple AirPods 3", "Samsung Galaxy Buds2 Pro", "Samsung Galaxy Buds FE",
+        "Sony WF-1000XM5", "Sony WF-C700N", "Bose QuietComfort Ultra Earbuds",
+        "Google Pixel Buds Pro", "OnePlus Buds 3", "Nothing Ear 2",
+        "Jabra Elite 85t", "Sennheiser Momentum True Wireless 4",
+        "Boat Airdopes 141", "Boat Airdopes 311", "Noise Buds VS104"
+    ])
+]
+
+# Quick Test - Minimal queries for rapid testing
+CATEGORIES_QUICK = [
+    ("Smartphones", ["iPhone 15", "Samsung Galaxy S24"]),
+    ("Laptops", ["MacBook Air", "Dell XPS 15"]),
+]
+
+# Default configuration
+CATEGORIES = CATEGORIES_STANDARD
+
 PRODUCTS_PER_QUERY = 1
 TOTAL_QUERIES = len(CATEGORIES) * 4
 
 # India electricity carbon factor
 CO2_FACTOR_INDIA = 0.820  # kg CO2/kWh
 
-print("\n" + "=" * 70)
-print("   COMPREHENSIVE COMPARISON TEST")
-print("   Single Agent (Try.py) vs Multi-Agent (multi_agent_scraper.py)")
-print("=" * 70)
-print(f"\n📋 Configuration:")
-print(f"   • Categories: {len(CATEGORIES)}")
-print(f"   • Queries/Category: 4")
-print(f"   • Total Queries: {TOTAL_QUERIES}")
-print(f"\n⏱️  Estimated Time: 2-4 hours (both methods)")
+
+def setup_driver():
+    """Setup Chrome WebDriver with optimized settings (like Try.py)"""
+    chrome_options = Options()
+    chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+    chrome_options.add_argument('--disable-extensions')
+    chrome_options.add_argument('--no-sandbox')
+    chrome_options.add_argument('--disable-dev-shm-usage')
+    chrome_options.add_argument('--disable-gpu')
+    chrome_options.add_argument('--window-size=1920,1080')
+    chrome_options.add_argument('--start-maximized')
+    chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
+    
+    # Headless mode for comparison test
+    chrome_options.add_argument('--headless=new')
+    
+    try:
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=chrome_options)
+        driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+            'source': 'Object.defineProperty(navigator, "webdriver", {get: () => undefined})'
+        })
+        driver.implicitly_wait(10)
+        return driver
+    except Exception as e:
+        print(f"Driver setup error: {e}")
+        return None
 
 # Import analyzers
 try:
@@ -66,6 +142,90 @@ try:
 except ImportError:
     POWER_MONITOR_AVAILABLE = False
     print("⚠️ Power monitor not available")
+
+# Import sentiment analyzer for multi-agent post-processing
+try:
+    from neural_sentiment_analyzer import NeuralSentimentAnalyzer, TRANSFORMERS_AVAILABLE
+    NEURAL_SENTIMENT_AVAILABLE = TRANSFORMERS_AVAILABLE
+except ImportError:
+    NEURAL_SENTIMENT_AVAILABLE = False
+    print("⚠️ Neural sentiment analyzer not available")
+
+
+def add_sentiment_to_products(products: List[Dict]) -> List[Dict]:
+    """Add sentiment analysis to products that don't have it"""
+    if not NEURAL_SENTIMENT_AVAILABLE:
+        print("⚠️ Sentiment analysis skipped (transformers not available)")
+        return products
+    
+    print("\n🧠 Adding sentiment analysis to products...")
+    try:
+        analyzer = NeuralSentimentAnalyzer()
+        
+        for i, product in enumerate(products):
+            # Skip if already has sentiment
+            if product.get('sentiment_score'):
+                continue
+            
+            # Combine text for sentiment analysis
+            text_parts = []
+            if product.get('name'):
+                text_parts.append(str(product['name']))
+            if product.get('description'):
+                text_parts.append(str(product['description'])[:500])
+            if product.get('customer_reviews'):
+                reviews = product['customer_reviews']
+                if isinstance(reviews, list):
+                    for r in reviews[:3]:
+                        if isinstance(r, dict):
+                            text_parts.append(str(r.get('text', ''))[:200])
+                        else:
+                            text_parts.append(str(r)[:200])
+                else:
+                    text_parts.append(str(reviews)[:500])
+            
+            text = ' '.join(text_parts)[:1000]
+            
+            if text.strip():
+                result = analyzer.analyze(text)
+                product['sentiment'] = result.get('sentiment', 'neutral')
+                product['sentiment_score'] = result.get('score', 0.5)
+                product['sentiment_label'] = result.get('sentiment', 'neutral').capitalize()
+                product['sentiment_confidence'] = result.get('confidence', 0.5) * 100
+            else:
+                product['sentiment'] = 'neutral'
+                product['sentiment_score'] = 0.5
+                product['sentiment_label'] = 'Neutral'
+                product['sentiment_confidence'] = 50.0
+            
+            if (i + 1) % 20 == 0:
+                print(f"   Processed {i+1}/{len(products)} products...")
+        
+        print(f"✅ Sentiment analysis complete for {len(products)} products")
+        
+    except Exception as e:
+        print(f"⚠️ Sentiment analysis error: {e}")
+    
+    return products
+
+
+def add_price_numeric(products: List[Dict]) -> List[Dict]:
+    """Add price_numeric field to products"""
+    import re
+    
+    for product in products:
+        if not product.get('price_numeric'):
+            price_str = str(product.get('price', ''))
+            # Remove currency symbols and commas
+            cleaned = re.sub(r'[₹$,\s]', '', price_str)
+            match = re.search(r'[\d.]+', cleaned)
+            if match:
+                try:
+                    product['price_numeric'] = float(match.group())
+                except ValueError:
+                    product['price_numeric'] = None
+    
+    return products
 
 
 class ComprehensiveMetrics:
@@ -112,7 +272,7 @@ class ComprehensiveMetrics:
         self.error_details.append({'query': query, 'error': str(error)})
         
     def get_summary(self) -> Dict:
-        total_time = (self.end_time - self.start_time).total_seconds() if self.end_time else 0
+        total_time = (self.end_time - self.start_time).total_seconds() if self.end_time and self.start_time else 0
         total_products = sum(self.products_per_source.values())
         query_times = [q['time'] for q in self.queries if q['time'] > 0]
         
@@ -421,6 +581,10 @@ def run_multi_agent_test() -> Tuple[List[Dict], Dict]:
         except Exception as e:
             print(f"⚠️ UMAP error: {e}")
     
+    # Add sentiment analysis and price_numeric for multi-agent products
+    all_products = add_price_numeric(all_products)
+    all_products = add_sentiment_to_products(all_products)
+    
     summary = metrics.get_summary()
     with open('scraped_multi_agent.pkl', 'wb') as f:
         pickle.dump({
@@ -437,10 +601,147 @@ def run_multi_agent_test() -> Tuple[List[Dict], Dict]:
     return all_products, summary
 
 
+def select_test_configuration():
+    """Select which category configuration to use"""
+    global CATEGORIES, TOTAL_QUERIES, PRODUCTS_PER_QUERY
+    
+    print("\n" + "=" * 70)
+    print("   COMPREHENSIVE COMPARISON TEST")
+    print("   Single Agent (Try.py) vs Multi-Agent (multi_agent_scraper.py)")
+    print("=" * 70)
+    
+    print("\n📋 Select Test Configuration:")
+    print("   1. Standard Test (10 categories, 4 queries each) ~2-4 hours")
+    print("   2. Large Categories Test (5 categories, 15-24 queries each) ~4-6 hours")
+    print("   3. Quick Test (2 categories, 2 queries each) ~15-30 min")
+    print("   4. Custom - Smartphones Only (24 queries)")
+    print("   5. Custom - Laptops Only (22 queries)")
+    
+    config_choice = input("\nConfiguration (1-5): ").strip()
+    
+    if config_choice == '1':
+        CATEGORIES = CATEGORIES_STANDARD
+        print("\n✓ Selected: Standard Test")
+    elif config_choice == '2':
+        CATEGORIES = CATEGORIES_LARGE
+        print("\n✓ Selected: Large Categories Test")
+    elif config_choice == '3':
+        CATEGORIES = CATEGORIES_QUICK
+        PRODUCTS_PER_QUERY = 2
+        print("\n✓ Selected: Quick Test")
+    elif config_choice == '4':
+        CATEGORIES = [("Smartphones", CATEGORIES_LARGE[0][1])]
+        PRODUCTS_PER_QUERY = 2
+        print("\n✓ Selected: Smartphones Only")
+    elif config_choice == '5':
+        CATEGORIES = [("Laptops", CATEGORIES_LARGE[1][1])]
+        PRODUCTS_PER_QUERY = 2
+        print("\n✓ Selected: Laptops Only")
+    else:
+        CATEGORIES = CATEGORIES_STANDARD
+        print("\n✓ Using default: Standard Test")
+    
+    total_queries = sum(len(queries) for _, queries in CATEGORIES)
+    TOTAL_QUERIES = total_queries
+    
+    print(f"\n📊 Configuration Summary:")
+    print(f"   • Categories: {len(CATEGORIES)}")
+    for cat, queries in CATEGORIES:
+        print(f"     - {cat}: {len(queries)} queries")
+    print(f"   • Total Queries: {total_queries}")
+    print(f"   • Products/Query: {PRODUCTS_PER_QUERY}")
+    print(f"   • Expected Products: ~{total_queries * PRODUCTS_PER_QUERY * 4} (max)")
+    
+    return CATEGORIES, TOTAL_QUERIES, PRODUCTS_PER_QUERY
+
+
+def run_multi_agent_parallel_enhanced(category: str, query: str, products_per_query: int) -> Dict:
+    """Run multi-agent scraping with parallel browser instances (like Try.py)"""
+    from multi_agent_scraper import (
+        BrowserAgent, AmazonAgent, FlipkartAgent, CromaAgent, RelianceAgent
+    )
+    
+    results = {
+        'Amazon': [],
+        'Flipkart': [],
+        'Croma': [],
+        'Reliance Digital': []
+    }
+    
+    def scrape_amazon():
+        try:
+            browser = BrowserAgent()
+            browser.start()
+            agent = AmazonAgent(browser)
+            results['Amazon'] = agent.search(query, products_per_query, True)
+            browser.stop()
+        except Exception as e:
+            print(f"      Amazon error: {e}")
+    
+    def scrape_flipkart():
+        try:
+            browser = BrowserAgent()
+            browser.start()
+            agent = FlipkartAgent(browser)
+            results['Flipkart'] = agent.search(query, products_per_query, True)
+            browser.stop()
+        except Exception as e:
+            print(f"      Flipkart error: {e}")
+    
+    def scrape_croma():
+        try:
+            browser = BrowserAgent()
+            browser.start()
+            agent = CromaAgent(browser)
+            results['Croma'] = agent.search(query, products_per_query, True)
+            browser.stop()
+        except Exception as e:
+            print(f"      Croma error: {e}")
+    
+    def scrape_reliance():
+        try:
+            browser = BrowserAgent()
+            browser.start()
+            agent = RelianceAgent(browser)
+            results['Reliance Digital'] = agent.search(query, products_per_query, True)
+            browser.stop()
+        except Exception as e:
+            print(f"      Reliance error: {e}")
+    
+    # Run all scrapers in parallel
+    threads = [
+        Thread(target=scrape_amazon),
+        Thread(target=scrape_flipkart),
+        Thread(target=scrape_croma),
+        Thread(target=scrape_reliance)
+    ]
+    
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=120)  # 2 minute timeout per query
+    
+    return results
+
+
 def main():
     print(f"\n⏱️  Start Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
-    choice = input("\nSelect test mode:\n  1. Single Agent only\n  2. Multi-Agent only\n  3. Both (Full Comparison)\n\nChoice (1/2/3): ").strip()
+    # Select test configuration
+    categories, total_queries, products_per_query = select_test_configuration()
+    
+    # Update global variables
+    global CATEGORIES, TOTAL_QUERIES, PRODUCTS_PER_QUERY
+    CATEGORIES = categories
+    TOTAL_QUERIES = total_queries
+    PRODUCTS_PER_QUERY = products_per_query
+    
+    print("\n📋 Select Test Mode:")
+    print("   1. Single Agent only (Try.py)")
+    print("   2. Multi-Agent only (multi_agent_scraper.py)")
+    print("   3. Both (Full Comparison)")
+    
+    choice = input("\nChoice (1/2/3): ").strip()
     
     if choice in ['1', '3']:
         run_single_agent_test()
@@ -456,7 +757,8 @@ def main():
     for f in ['scraped_single_agent.pkl', 'scraped_multi_agent.pkl', 
               'umap_single_agent.png', 'umap_multi_agent.png']:
         if os.path.exists(f):
-            print(f"   ✓ {f}")
+            size = os.path.getsize(f)
+            print(f"   ✓ {f} ({size/1024:.1f} KB)")
     
     print(f"\n📊 Run 'python analyze_pkl_results.py' for detailed Chapter 5 report")
     print(f"\n⏱️  End Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")

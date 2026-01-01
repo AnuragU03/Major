@@ -824,81 +824,138 @@ class RelianceDigitalScraper:
         self.wait = WebDriverWait(driver, 15)
         self.base_url = "https://www.reliancedigital.in"
     
+    def _generate_search_variations(self, query):
+        """Generate multiple search query variations for better results"""
+        variations = []
+        
+        # Original query
+        variations.append(query)
+        
+        # Split camelCase/PascalCase (e.g., OnePlus -> One Plus)
+        import re
+        spaced = re.sub(r'([a-z])([A-Z])', r'\1 \2', query)
+        if spaced != query:
+            variations.append(spaced)
+        
+        # Remove extra spaces and try lowercase
+        simple = ' '.join(query.split())
+        if simple.lower() not in [v.lower() for v in variations]:
+            variations.append(simple)
+        
+        # Try with spaces between brand words (iPhone15 -> iPhone 15)
+        with_spaces = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', query)
+        if with_spaces != query and with_spaces not in variations:
+            variations.append(with_spaces)
+        
+        return variations[:3]  # Max 3 variations
+    
     def search_products(self, query, max_products=10):
         """Search for products on Reliance Digital with detailed product page scraping"""
         print(f"🔍 Searching Reliance Digital for: {query}")
         
         products = []
+        query_variations = self._generate_search_variations(query)
+        product_elements = []
+        successful_variation = query
         
-        try:
-            # Use /products?q= format with pagination parameters
-            search_url = f"{self.base_url}/products?q={query.replace(' ', '%20')}&page_no=1&page_size=12&page_type=number"
-            print(f"📌 Reliance Digital URL: {search_url}")
-            self.driver.get(search_url)
-            time.sleep(random.uniform(4, 6))
-            
+        for variation in query_variations:
             try:
-                self.wait.until(EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, ".sp, .product-card, div[class*='product'], li[class*='product'], .pl__container")
-                ))
-            except TimeoutException:
-                # Try with search_term parameter
-                alt_search_url = f"{self.base_url}/products?q={query.replace(' ', '%20')}&search_term={query.replace(' ', '%20')}&internal_source=search_prompt&page_no=1&page_size=12&page_type=number"
-                print(f"📌 Trying alternate URL: {alt_search_url}")
-                self.driver.get(alt_search_url)
+                # Use full URL format with search_term and internal_source for better results
+                encoded_query = variation.replace(' ', '%20')
+                search_url = f"{self.base_url}/products?q={encoded_query}&search_term={encoded_query}&internal_source=search_prompt&page_no=1&page_size=12&page_type=number"
+                print(f"📌 Trying Reliance Digital URL: {search_url}")
+                self.driver.get(search_url)
                 time.sleep(random.uniform(3, 5))
+                
+                # Dismiss notification popup if present
+                try:
+                    no_btn = self.driver.find_element(By.XPATH, "//button[contains(text(), 'No, don')]")
+                    no_btn.click()
+                    time.sleep(0.5)
+                except:
+                    pass
+                
                 try:
                     self.wait.until(EC.presence_of_element_located(
                         (By.CSS_SELECTOR, ".sp, .product-card, div[class*='product'], li[class*='product'], .pl__container")
                     ))
                 except TimeoutException:
-                    print("⚠️ No products found on Reliance Digital")
-                    return products
-            
-            for _ in range(3):
-                self.driver.execute_script("window.scrollBy(0, 800);")
-                time.sleep(random.uniform(1, 2))
-            
-            product_selectors = [".sp", ".product-card", "[data-testid='product-card']", ".pl__container"]
-            
-            product_elements = []
-            for selector in product_selectors:
-                try:
-                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    if elements:
-                        product_elements = elements[:max_products]
-                        print(f"✅ Found {len(product_elements)} products on Reliance Digital")
-                        break
-                except:
+                    print(f"   ⚠️ No products with variation: {variation}")
                     continue
-            
-            # Extract basic info and product links
-            basic_products = []
-            for elem in product_elements:
-                try:
-                    product = self._extract_reliance_product(elem)
-                    # More lenient validation - accept if we have name (price may fail)
-                    if product and product['name']:
+                
+                # Scroll to load products
+                for _ in range(3):
+                    self.driver.execute_script("window.scrollBy(0, 800);")
+                    time.sleep(random.uniform(0.5, 1))
+                
+                # Try to find products
+                product_selectors = [".product-card", ".sp", "[data-testid='product-card']"]
+                for selector in product_selectors:
+                    try:
+                        elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        if elements:
+                            product_elements = elements[:max_products * 3]
+                            successful_variation = variation
+                            print(f"   ✅ Found {len(elements)} products with variation: {variation}")
+                            break
+                    except:
+                        continue
+                
+                if product_elements:
+                    break  # Found products, stop trying variations
+                    
+            except Exception as e:
+                print(f"   ⚠️ Error with variation '{variation}': {e}")
+                continue
+        
+        if not product_elements:
+            print("⚠️ No products found with any URL variation")
+            return products
+        
+        print(f"✅ Found {len(product_elements)} products on Reliance Digital")
+        
+        # Build search keywords for relevance check
+        query_words = set(query.lower().split())
+        # Remove common words
+        query_words -= {'the', 'a', 'an', 'for', 'with', 'and', 'or', 'in', 'on', 'at', 'to'}
+        
+        # Extract basic info and product links
+        basic_products = []
+        for elem in product_elements:
+            try:
+                product = self._extract_reliance_product(elem)
+                # Check relevance - at least one keyword should match
+                if product and product['name']:
+                    name_lower = product['name'].lower()
+                    is_relevant = any(word in name_lower for word in query_words if len(word) > 2)
+                    
+                    if is_relevant:
                         basic_products.append(product)
                         print(f"  ✓ Extracted: {product['name'][:50]}... Link: {bool(product.get('product_link'))}")
                         if len(basic_products) >= max_products:
                             break
-                except Exception as e:
-                    print(f"  ⚠️ Failed to extract Reliance product: {e}")
-                    continue
-            
-            # Now go into each product page to get detailed specifications
-            print(f"📄 Getting detailed specs from {len(basic_products)} Reliance product pages...")
+                    else:
+                        print(f"  ⚠️ Skipping irrelevant: {product['name'][:40]}...")
+            except Exception as e:
+                print(f"  ⚠️ Failed to extract Reliance product: {e}")
+                continue
+        
+        # Now go into each product page to get detailed specifications
+        # Skip if we already have enough info (name, price, image)
+        needs_details = [p for p in basic_products if not p.get('technical_details')]
+        
+        if needs_details:
+            print(f"📄 Getting detailed specs from {len(needs_details)} Reliance product pages...")
             main_window = self.driver.current_window_handle
             
-            for i, product in enumerate(basic_products):
+            for i, product in enumerate(needs_details):
                 if product.get('product_link'):
                     try:
-                        print(f"  📖 Opening Reliance product {i+1}/{len(basic_products)}: {product['name'][:40]}...")
+                        print(f"  📖 Opening Reliance product {i+1}/{len(needs_details)}: {product['name'][:40]}...")
                         
                         # Open product page in new tab
                         self.driver.execute_script(f"window.open('{product['product_link']}', '_blank');")
-                        time.sleep(random.uniform(2, 4))
+                        time.sleep(random.uniform(1.5, 2.5))
                         
                         # Switch to new tab
                         windows = self.driver.window_handles
@@ -925,23 +982,20 @@ class RelianceDigitalScraper:
                             # Close product tab
                             self.driver.close()
                             self.driver.switch_to.window(main_window)
-                            time.sleep(random.uniform(0.5, 1))
+                            time.sleep(random.uniform(0.3, 0.6))
                     except Exception as e:
                         print(f"    ⚠️ Error getting Reliance product details: {e}")
-                        # Ensure we're back to main window
                         try:
                             self.driver.switch_to.window(main_window)
                         except:
                             pass
                 
                 products.append(product)
-            
-            print(f"✅ Extracted {len(products)} detailed products from Reliance Digital")
-            return products
-            
-        except Exception as e:
-            print(f"❌ Reliance Digital scraping failed: {e}")
-            return products
+        else:
+            products = basic_products
+        
+        print(f"✅ Extracted {len(products)} detailed products from Reliance Digital")
+        return products
     
     def _scrape_product_details(self):
         """Scrape detailed specifications from a Reliance Digital product page"""
@@ -1184,15 +1238,30 @@ class RelianceDigitalScraper:
         }
         
         try:
-            name_selectors = [".sp__name", ".product-title", "h3", "[class*='title']", ".pl__title", ".pl__name", "a[class*='product']", ".product-name"]
+            # Get full text first for filtering and fallback extraction
+            full_text = element.text.strip()
+            
+            # Updated name selectors based on current site structure
+            name_selectors = ["p[class*='name']", "a p", ".sp__name", ".product-title", "h3", "[class*='title']", ".pl__title", ".pl__name"]
             for selector in name_selectors:
                 try:
                     name_elem = element.find_element(By.CSS_SELECTOR, selector)
-                    product['name'] = name_elem.text.strip()
-                    if product['name']:
+                    text = name_elem.text.strip()
+                    # Skip if it looks like a price or badge
+                    if text and not text.startswith('₹') and 'OFF' not in text and 'Compare' not in text:
+                        product['name'] = text
                         break
                 except:
                     continue
+            
+            # If no name found, try to extract from full text
+            if not product['name'] and full_text:
+                lines = [l.strip() for l in full_text.split('\n') if l.strip()]
+                for line in lines:
+                    # Skip prices, badges, and short text
+                    if not line.startswith('₹') and 'OFF' not in line and 'Compare' not in line and len(line) > 10:
+                        product['name'] = line
+                        break
             
             # Try multiple approaches to get product link
             link_selectors = ["a[href*='/products/']", "a[href*='/p/']", "a.product-link", "a"]
@@ -1206,21 +1275,39 @@ class RelianceDigitalScraper:
                 except:
                     continue
             
-            price_selectors = [".sp__price", ".product-price", "[class*='price'] span", ".pl__amount"]
+            # Updated price selectors - look for ₹ symbol
+            price_selectors = ["span[class*='price']", "span[class*='Price']", ".sp__price", "[class*='amount']", ".pl__amount"]
             for selector in price_selectors:
                 try:
-                    price_elem = element.find_element(By.CSS_SELECTOR, selector)
-                    price_text = price_elem.text.strip()
-                    product['price'] = price_text
-                    product['price_numeric'] = self._clean_price(price_text)
+                    price_elems = element.find_elements(By.CSS_SELECTOR, selector)
+                    for price_elem in price_elems:
+                        price_text = price_elem.text.strip()
+                        if '₹' in price_text or price_text.replace(',', '').replace('.', '').isdigit():
+                            product['price'] = price_text
+                            product['price_numeric'] = self._clean_price(price_text)
+                            if product['price_numeric'] > 0:
+                                break
                     if product['price_numeric'] > 0:
                         break
                 except:
                     continue
             
+            # Fallback: extract price from full text
+            if product['price_numeric'] == 0 and full_text:
+                price_match = re.search(r'₹[\d,]+\.?\d*', full_text)
+                if price_match:
+                    product['price'] = price_match.group()
+                    product['price_numeric'] = self._clean_price(price_match.group())
+            
+            # Fast image extraction - check multiple attributes for lazy-loaded images
             try:
                 img_elem = element.find_element(By.CSS_SELECTOR, "img")
-                product['image_url'] = img_elem.get_attribute('src') or img_elem.get_attribute('data-src')
+                # Try multiple attributes in order of preference
+                for attr in ['src', 'data-src', 'data-lazy-src', 'data-original']:
+                    img_url = img_elem.get_attribute(attr)
+                    if img_url and img_url.startswith('http') and 'placeholder' not in img_url.lower():
+                        product['image_url'] = img_url
+                        break
             except:
                 pass
             

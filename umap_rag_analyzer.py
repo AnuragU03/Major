@@ -192,16 +192,25 @@ class RAGStorage:
         
         df = pd.DataFrame(self.products)
         
+        # Safely convert price column to numeric
+        price_stats = {}
+        if 'price' in df.columns:
+            # Convert to numeric, coercing errors to NaN
+            df['price_numeric'] = pd.to_numeric(df['price'], errors='coerce')
+            valid_prices = df['price_numeric'].dropna()
+            if len(valid_prices) > 0:
+                price_stats = {
+                    'min': float(valid_prices.min()),
+                    'max': float(valid_prices.max()),
+                    'mean': float(valid_prices.mean()),
+                    'median': float(valid_prices.median())
+                }
+        
         stats = {
             'total_products': len(self.products),
             'by_category': df['category'].value_counts().to_dict() if 'category' in df else {},
             'by_source': df['source'].value_counts().to_dict() if 'source' in df else {},
-            'price_stats': {
-                'min': float(df['price'].min()) if 'price' in df else 0,
-                'max': float(df['price'].max()) if 'price' in df else 0,
-                'mean': float(df['price'].mean()) if 'price' in df else 0,
-                'median': float(df['price'].median()) if 'price' in df else 0
-            } if 'price' in df else {},
+            'price_stats': price_stats,
             'metadata': self.metadata
         }
         
@@ -265,18 +274,45 @@ class UMAPAnalyzer:
         text_features = vectorizer.fit_transform(text_data).toarray()
         print(f"   Text features: {text_features.shape[1]} dimensions")
         
-        # 2. Numerical features (price)
+        # 2. Numerical features (price) - handle string prices with commas
         if 'price' in self.df.columns:
-            price_data = self.df['price'].fillna(0).values.reshape(-1, 1)
+            # Clean price data: remove commas, currency symbols, and convert to numeric
+            def clean_price(p):
+                if pd.isna(p) or p == '':
+                    return 0.0
+                p_str = str(p)
+                # Remove currency symbols, commas, spaces
+                p_str = p_str.replace('₹', '').replace(',', '').replace(' ', '').strip()
+                try:
+                    return float(p_str) if p_str else 0.0
+                except ValueError:
+                    return 0.0
+            
+            price_data = self.df['price'].apply(clean_price).values.reshape(-1, 1)
             scaler = StandardScaler()
             numerical_features = scaler.fit_transform(price_data)
             print(f"   Price feature: 1 dimension")
         else:
             numerical_features = np.zeros((len(self.df), 1))
         
-        # 3. Rating features (if available)
+        # 3. Rating features (if available) - handle string ratings
         if 'rating' in self.df.columns:
-            ratings = pd.to_numeric(self.df['rating'], errors='coerce').fillna(0)
+            def clean_rating(r):
+                if pd.isna(r) or r == '':
+                    return 0.0
+                r_str = str(r)
+                # Extract first number from rating string like "4.5 out of 5 stars"
+                import re
+                match = re.search(r'([\d.]+)', r_str)
+                if match:
+                    try:
+                        rating = float(match.group(1))
+                        return rating if 0 <= rating <= 5 else 0.0
+                    except ValueError:
+                        return 0.0
+                return 0.0
+            
+            ratings = self.df['rating'].apply(clean_rating)
             rating_features = StandardScaler().fit_transform(ratings.values.reshape(-1, 1))
             print(f"   Rating feature: 1 dimension")
         else:
@@ -429,13 +465,15 @@ class UMAPAnalyzer:
         return interpretation
     
     def create_visualization(self, save_path: str = 'umap_visualization.png', 
-                            figsize: Tuple[int, int] = (20, 6)) -> str:
+                            figsize: Tuple[int, int] = (20, 6),
+                            title_prefix: str = '') -> str:
         """
         Create 3-panel UMAP visualization for report.
         
         Args:
             save_path: Path to save the figure
             figsize: Figure size
+            title_prefix: Prefix for titles (e.g., "Single-Agent" or "Multi-Agent")
             
         Returns:
             Path to saved figure
@@ -509,39 +547,61 @@ class UMAPAnalyzer:
         # Panel 3: Color by Price Range
         if 'price' in self.df.columns:
             try:
-                price_labels = pd.qcut(self.df['price'].fillna(0), q=4, 
-                                       labels=['Budget', 'Mid-Range', 'Premium', 'Luxury'])
+                # Clean price data first
+                def clean_price(p):
+                    if pd.isna(p) or p == '':
+                        return 0.0
+                    p_str = str(p)
+                    p_str = p_str.replace('₹', '').replace(',', '').replace(' ', '').strip()
+                    try:
+                        return float(p_str) if p_str else 0.0
+                    except ValueError:
+                        return 0.0
                 
-                price_colors = {'Budget': '#2ECC71', 'Mid-Range': '#3498DB', 
-                               'Premium': '#9B59B6', 'Luxury': '#E74C3C'}
+                clean_prices = self.df['price'].apply(clean_price)
                 
-                for label in ['Budget', 'Mid-Range', 'Premium', 'Luxury']:
-                    mask = price_labels == label
-                    axes[2].scatter(
-                        self.embedding[mask, 0],
-                        self.embedding[mask, 1],
-                        c=price_colors[label],
-                        label=label,
+                # Filter out zero prices for quantile calculation
+                non_zero_prices = clean_prices[clean_prices > 0]
+                if len(non_zero_prices) > 4:
+                    price_labels = pd.qcut(clean_prices.replace(0, np.nan), q=4, 
+                                           labels=['Budget', 'Mid-Range', 'Premium', 'Luxury'],
+                                           duplicates='drop')
+                    price_labels = price_labels.fillna('Unknown')
+                    
+                    price_colors = {'Budget': '#2ECC71', 'Mid-Range': '#3498DB', 
+                                   'Premium': '#9B59B6', 'Luxury': '#E74C3C', 'Unknown': '#95A5A6'}
+                    
+                    for label in ['Budget', 'Mid-Range', 'Premium', 'Luxury', 'Unknown']:
+                        mask = price_labels == label
+                        if mask.sum() > 0:
+                            axes[2].scatter(
+                                self.embedding[mask, 0],
+                                self.embedding[mask, 1],
+                                c=price_colors[label],
+                                label=label,
+                                s=60,
+                                alpha=0.7,
+                                edgecolors='white',
+                                linewidths=0.5
+                            )
+                    
+                    axes[2].legend(fontsize=12)
+                else:
+                    # Use continuous colormap for numeric prices
+                    scatter = axes[2].scatter(
+                        self.embedding[:, 0],
+                        self.embedding[:, 1],
+                        c=clean_prices,
+                        cmap='viridis',
                         s=60,
                         alpha=0.7,
                         edgecolors='white',
                         linewidths=0.5
                     )
-                
-                axes[2].legend(fontsize=12)
+                    plt.colorbar(scatter, ax=axes[2], label='Price (₹)')
             except Exception as e:
-                # Fallback to continuous colormap
-                scatter = axes[2].scatter(
-                    self.embedding[:, 0],
-                    self.embedding[:, 1],
-                    c=self.df['price'].fillna(0),
-                    cmap='viridis',
-                    s=60,
-                    alpha=0.7,
-                    edgecolors='white',
-                    linewidths=0.5
-                )
-                plt.colorbar(scatter, ax=axes[2], label='Price (₹)')
+                # Fallback to simple scatter
+                axes[2].scatter(self.embedding[:, 0], self.embedding[:, 1], s=60, alpha=0.7, c='green')
         else:
             axes[2].scatter(self.embedding[:, 0], self.embedding[:, 1], s=60, alpha=0.7, c='green')
         
@@ -550,9 +610,10 @@ class UMAPAnalyzer:
         axes[2].set_ylabel('UMAP Dimension 2', fontsize=12)
         
         # Add overall title with metrics
+        prefix = f"{title_prefix} " if title_prefix else ""
         if self.metrics and 'silhouette_score' in self.metrics:
             fig.suptitle(
-                f"UMAP Product Clustering (n={len(self.df)}) | "
+                f"{prefix}UMAP Product Clustering (n={len(self.df)}) | "
                 f"Silhouette: {self.metrics['silhouette_score']:.2f} | "
                 f"Purity: {self.metrics['cluster_purity']:.0f}%",
                 fontsize=14, fontweight='bold', y=1.02
@@ -564,7 +625,8 @@ class UMAPAnalyzer:
         
         return save_path
     
-    def create_category_breakdown(self, save_path: str = 'category_umap.png') -> str:
+    def create_category_breakdown(self, save_path: str = 'category_umap.png',
+                                  title_prefix: str = '') -> str:
         """Create individual UMAP plots for each category"""
         if self.embedding is None:
             self.run_umap()
@@ -620,7 +682,8 @@ class UMAPAnalyzer:
         
         return save_path
     
-    def create_sentiment_overlay(self, save_path: str = 'sentiment_umap.png') -> str:
+    def create_sentiment_overlay(self, save_path: str = 'sentiment_umap.png',
+                                   title_prefix: str = '') -> str:
         """Create UMAP with sentiment overlay"""
         if self.embedding is None:
             self.run_umap()
@@ -628,6 +691,8 @@ class UMAPAnalyzer:
         if 'sentiment_score' not in self.df.columns:
             print("⚠️ No sentiment_score column found")
             return None
+        
+        prefix = f"{title_prefix} " if title_prefix else ""
         
         fig, axes = plt.subplots(1, 2, figsize=(14, 6))
         
@@ -643,7 +708,7 @@ class UMAPAnalyzer:
             linewidths=0.5
         )
         plt.colorbar(scatter, ax=axes[0], label='Sentiment Score')
-        axes[0].set_title('Sentiment Score Distribution', fontsize=14, fontweight='bold')
+        axes[0].set_title(f'{prefix}Sentiment Score Distribution', fontsize=14, fontweight='bold')
         axes[0].set_xlabel('UMAP Dimension 1', fontsize=12)
         axes[0].set_ylabel('UMAP Dimension 2', fontsize=12)
         
@@ -680,35 +745,26 @@ class UMAPAnalyzer:
         
         return save_path
     
-    def get_metrics_table(self) -> str:
+    def get_metrics_table(self, agent_label: str = '') -> str:
         """Generate metrics table for report"""
         if not self.metrics:
             self.calculate_clustering_metrics()
         
-        table = """
-## Table 5: UMAP Clustering Quality Metrics
+        title = f"## Table 5: {agent_label} UMAP Clustering Quality Metrics" if agent_label else "## Table 5: UMAP Clustering Quality Metrics"
+        
+        table = f"""
+{title}
 
 | Metric | Value | Interpretation |
 |--------|-------|----------------|
-| Silhouette Score | {silhouette_score} | {silhouette_interp} |
-| Davies-Bouldin Index | {davies_bouldin_index} | {db_interp} |
-| Cluster Purity | {cluster_purity}% | {purity_interp} |
-| Products Analyzed | {n_products} | - |
-| Categories | {n_categories} | - |
+| Silhouette Score | {self.metrics.get('silhouette_score', 'N/A')} | {self.metrics.get('interpretation', {}).get('silhouette', 'N/A')} |
+| Davies-Bouldin Index | {self.metrics.get('davies_bouldin_index', 'N/A')} | {self.metrics.get('interpretation', {}).get('davies_bouldin', 'N/A')} |
+| Cluster Purity | {self.metrics.get('cluster_purity', 'N/A')}% | {self.metrics.get('interpretation', {}).get('purity', 'N/A')} |
+| Products Analyzed | {self.metrics.get('n_products', 0)} | - |
+| Categories | {self.metrics.get('n_categories', 0)} | - |
 
-**Key Finding:** {key_finding}
-""".format(
-            silhouette_score=self.metrics.get('silhouette_score', 'N/A'),
-            davies_bouldin_index=self.metrics.get('davies_bouldin_index', 'N/A'),
-            cluster_purity=self.metrics.get('cluster_purity', 'N/A'),
-            n_products=self.metrics.get('n_products', 0),
-            n_categories=self.metrics.get('n_categories', 0),
-            silhouette_interp=self.metrics.get('interpretation', {}).get('silhouette', 'N/A'),
-            db_interp=self.metrics.get('interpretation', {}).get('davies_bouldin', 'N/A'),
-            purity_interp=self.metrics.get('interpretation', {}).get('purity', 'N/A'),
-            key_finding=self._generate_key_finding()
-        )
-        
+**Key Finding:** {self._generate_key_finding()}
+"""
         return table
     
     def _generate_key_finding(self) -> str:
@@ -746,15 +802,22 @@ def analyze_scraped_data(pickle_file: str):
         print(f"   ❌ Error loading file: {e}")
         return None
     
-    # Initialize RAG storage
+    # Determine agent type from filename
+    agent_type = "multi_agent" if "multi" in pickle_file.lower() else "single_agent"
+    agent_label = "Multi-Agent" if agent_type == "multi_agent" else "Single-Agent"
+    
+    print(f"   🔍 Detected: {agent_label} data")
+    
+    # Initialize RAG storage with agent-specific naming
     print("\n📦 Initializing RAG Storage...")
-    rag = RAGStorage('rag_products.pkl')
+    rag_path = f'rag_products_{agent_type}.pkl'
+    rag = RAGStorage(rag_path)
     rag.add_products(products)
     rag.save()
     
     # Print statistics
     stats = rag.get_statistics()
-    print(f"\n📊 Dataset Statistics:")
+    print(f"\n📊 {agent_label} Dataset Statistics:")
     print(f"   Total Products: {stats['total_products']}")
     print(f"   Categories: {len(stats['by_category'])}")
     for cat, count in sorted(stats['by_category'].items()):
@@ -765,31 +828,171 @@ def analyze_scraped_data(pickle_file: str):
     
     # Run UMAP analysis
     if UMAP_AVAILABLE:
-        print("\n🗺️ Running UMAP Analysis...")
+        print(f"\n🗺️ Running UMAP Analysis for {agent_label}...")
         analyzer = UMAPAnalyzer(products)
         analyzer.prepare_features()
         analyzer.run_umap()
         analyzer.calculate_clustering_metrics()
         
-        # Create visualizations
+        # Create visualizations with agent-specific naming
         print("\n🎨 Creating Visualizations...")
-        analyzer.create_visualization('umap_visualization.png')
-        analyzer.create_category_breakdown('umap_categories.png')
+        analyzer.create_visualization(f'umap_visualization_{agent_type}.png', title_prefix=agent_label)
+        analyzer.create_category_breakdown(f'umap_categories_{agent_type}.png', title_prefix=agent_label)
         
         if 'sentiment_score' in pd.DataFrame(products).columns:
-            analyzer.create_sentiment_overlay('umap_sentiment.png')
+            analyzer.create_sentiment_overlay(f'umap_sentiment_{agent_type}.png', title_prefix=agent_label)
         
         # Print metrics table
-        print(analyzer.get_metrics_table())
+        print(f"\n{analyzer.get_metrics_table(agent_label)}")
         
         return {
             'rag_storage': rag,
             'analyzer': analyzer,
-            'metrics': analyzer.metrics
+            'metrics': analyzer.metrics,
+            'agent_type': agent_type
         }
     else:
         print("\n⚠️ UMAP not available. Install with: pip install umap-learn")
         return {'rag_storage': rag}
+
+
+def analyze_all_agents():
+    """Analyze both single and multi-agent pickle files"""
+    results = {}
+    
+    # Check for both files
+    single_file = 'scraped_single_agent.pkl'
+    multi_file = 'scraped_multi_agent.pkl'
+    
+    print("\n" + "🔬" * 30)
+    print("  UMAP RAG ANALYSIS - ALL AGENTS")
+    print("🔬" * 30)
+    
+    if os.path.exists(single_file):
+        print("\n" + "=" * 50)
+        print("📊 ANALYZING SINGLE-AGENT DATA")
+        print("=" * 50)
+        results['single'] = analyze_scraped_data(single_file)
+    else:
+        print(f"\n⚠️ {single_file} not found")
+    
+    if os.path.exists(multi_file):
+        print("\n" + "=" * 50)
+        print("📊 ANALYZING MULTI-AGENT DATA")
+        print("=" * 50)
+        results['multi'] = analyze_scraped_data(multi_file)
+    else:
+        print(f"\n⚠️ {multi_file} not found")
+    
+    # Generate comparison if both available
+    if 'single' in results and 'multi' in results:
+        print("\n" + "=" * 50)
+        print("📈 COMPARATIVE ANALYSIS")
+        print("=" * 50)
+        create_comparison_visualization(results)
+    
+    print("\n✅ Analysis Complete!")
+    print("\n📁 Generated Files:")
+    for f in os.listdir('.'):
+        if f.startswith('umap_') and f.endswith('.png'):
+            print(f"   ✓ {f}")
+    
+    return results
+
+
+def create_comparison_visualization(results: Dict):
+    """Create side-by-side comparison of single vs multi-agent UMAP"""
+    try:
+        single_analyzer = results['single']['analyzer']
+        multi_analyzer = results['multi']['analyzer']
+        
+        fig, axes = plt.subplots(2, 2, figsize=(16, 14))
+        
+        # Single-agent by category
+        if 'category' in single_analyzer.df.columns:
+            categories = single_analyzer.df['category'].unique()
+            colors = plt.cm.tab10(np.linspace(0, 1, len(categories)))
+            for cat, color in zip(categories, colors):
+                mask = single_analyzer.df['category'] == cat
+                axes[0, 0].scatter(
+                    single_analyzer.embedding[mask, 0],
+                    single_analyzer.embedding[mask, 1],
+                    c=[color], label=cat, s=60, alpha=0.7,
+                    edgecolors='white', linewidths=0.5
+                )
+            axes[0, 0].legend(fontsize=8, loc='upper right')
+        axes[0, 0].set_title(f'Single-Agent UMAP (n={len(single_analyzer.df)})', fontsize=12, fontweight='bold')
+        axes[0, 0].set_xlabel('UMAP Dimension 1')
+        axes[0, 0].set_ylabel('UMAP Dimension 2')
+        
+        # Multi-agent by category
+        if 'category' in multi_analyzer.df.columns:
+            categories = multi_analyzer.df['category'].unique()
+            colors = plt.cm.tab10(np.linspace(0, 1, len(categories)))
+            for cat, color in zip(categories, colors):
+                mask = multi_analyzer.df['category'] == cat
+                axes[0, 1].scatter(
+                    multi_analyzer.embedding[mask, 0],
+                    multi_analyzer.embedding[mask, 1],
+                    c=[color], label=cat, s=60, alpha=0.7,
+                    edgecolors='white', linewidths=0.5
+                )
+            axes[0, 1].legend(fontsize=8, loc='upper right')
+        axes[0, 1].set_title(f'Multi-Agent UMAP (n={len(multi_analyzer.df)})', fontsize=12, fontweight='bold')
+        axes[0, 1].set_xlabel('UMAP Dimension 1')
+        axes[0, 1].set_ylabel('UMAP Dimension 2')
+        
+        # Single-agent by source
+        if 'source' in single_analyzer.df.columns:
+            sources = single_analyzer.df['source'].unique()
+            source_colors = {'Amazon.in': '#FF9900', 'Flipkart': '#F8E71C', 
+                            'Croma': '#00A8E8', 'Reliance Digital': '#E31E52'}
+            for source in sources:
+                mask = single_analyzer.df['source'] == source
+                axes[1, 0].scatter(
+                    single_analyzer.embedding[mask, 0],
+                    single_analyzer.embedding[mask, 1],
+                    c=source_colors.get(source, '#888888'), label=source, 
+                    s=60, alpha=0.7, edgecolors='white', linewidths=0.5
+                )
+            axes[1, 0].legend(fontsize=9)
+        axes[1, 0].set_title('Single-Agent by Source', fontsize=12, fontweight='bold')
+        axes[1, 0].set_xlabel('UMAP Dimension 1')
+        axes[1, 0].set_ylabel('UMAP Dimension 2')
+        
+        # Multi-agent by source
+        if 'source' in multi_analyzer.df.columns:
+            sources = multi_analyzer.df['source'].unique()
+            for source in sources:
+                mask = multi_analyzer.df['source'] == source
+                axes[1, 1].scatter(
+                    multi_analyzer.embedding[mask, 0],
+                    multi_analyzer.embedding[mask, 1],
+                    c=source_colors.get(source, '#888888'), label=source, 
+                    s=60, alpha=0.7, edgecolors='white', linewidths=0.5
+                )
+            axes[1, 1].legend(fontsize=9)
+        axes[1, 1].set_title('Multi-Agent by Source', fontsize=12, fontweight='bold')
+        axes[1, 1].set_xlabel('UMAP Dimension 1')
+        axes[1, 1].set_ylabel('UMAP Dimension 2')
+        
+        # Add metrics comparison
+        single_metrics = single_analyzer.metrics
+        multi_metrics = multi_analyzer.metrics
+        
+        fig.suptitle(
+            f"UMAP Comparison: Single-Agent vs Multi-Agent\n"
+            f"Silhouette: {single_metrics.get('silhouette_score', 0):.3f} vs {multi_metrics.get('silhouette_score', 0):.3f} | "
+            f"Purity: {single_metrics.get('cluster_purity', 0):.1f}% vs {multi_metrics.get('cluster_purity', 0):.1f}%",
+            fontsize=14, fontweight='bold', y=1.02
+        )
+        
+        plt.tight_layout()
+        plt.savefig('umap_comparison.png', dpi=300, bbox_inches='tight', facecolor='white')
+        print("   ✅ Saved: umap_comparison.png")
+        
+    except Exception as e:
+        print(f"   ⚠️ Could not create comparison: {e}")
 
 
 # Test
@@ -797,37 +1000,65 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) > 1:
-        pickle_file = sys.argv[1]
-    else:
-        # Look for pickle files
-        pkl_files = [f for f in os.listdir('.') if f.endswith('.pkl')]
-        if pkl_files:
-            print("Available pickle files:")
-            for i, f in enumerate(pkl_files, 1):
-                print(f"  {i}. {f}")
-            choice = input("Select file (Enter for first): ").strip()
-            pickle_file = pkl_files[int(choice)-1] if choice else pkl_files[0]
+        if sys.argv[1] == '--all':
+            # Analyze both single and multi-agent
+            analyze_all_agents()
         else:
-            print("No pickle files found. Creating test data...")
+            pickle_file = sys.argv[1]
+            analyze_scraped_data(pickle_file)
+    else:
+        # Check if both files exist - if so, offer to analyze all
+        single_exists = os.path.exists('scraped_single_agent.pkl')
+        multi_exists = os.path.exists('scraped_multi_agent.pkl')
+        
+        if single_exists and multi_exists:
+            print("Both single-agent and multi-agent data found!")
+            print("  1. Analyze both (recommended)")
+            print("  2. Select individual file")
+            choice = input("Select option (Enter for 1): ").strip()
             
-            # Create test data
-            test_products = [
-                {'name': f'Samsung Galaxy S{24+i%3}', 'price': 50000+i*1000, 'category': 'Smartphones', 'source': 'Amazon', 'rating': '4.5', 'sentiment_score': 0.8}
-                for i in range(20)
-            ] + [
-                {'name': f'iPhone {15+i%2} Pro', 'price': 80000+i*2000, 'category': 'Smartphones', 'source': 'Flipkart', 'rating': '4.7', 'sentiment_score': 0.85}
-                for i in range(15)
-            ] + [
-                {'name': f'Dell Inspiron {i}', 'price': 45000+i*1000, 'category': 'Laptops', 'source': 'Amazon', 'rating': '4.2', 'sentiment_score': 0.7}
-                for i in range(15)
-            ] + [
-                {'name': f'Sony WH-1000XM{4+i%2}', 'price': 25000+i*500, 'category': 'Headphones', 'source': 'Flipkart', 'rating': '4.6', 'sentiment_score': 0.9}
-                for i in range(10)
-            ]
+            if choice == '' or choice == '1':
+                analyze_all_agents()
+            else:
+                # Look for pickle files
+                pkl_files = [f for f in os.listdir('.') if f.endswith('.pkl')]
+                if pkl_files:
+                    print("\nAvailable pickle files:")
+                    for i, f in enumerate(pkl_files, 1):
+                        print(f"  {i}. {f}")
+                    file_choice = input("Select file: ").strip()
+                    pickle_file = pkl_files[int(file_choice)-1] if file_choice else pkl_files[0]
+                    analyze_scraped_data(pickle_file)
+        else:
+            # Look for pickle files
+            pkl_files = [f for f in os.listdir('.') if f.endswith('.pkl')]
+            if pkl_files:
+                print("Available pickle files:")
+                for i, f in enumerate(pkl_files, 1):
+                    print(f"  {i}. {f}")
+                choice = input("Select file (Enter for first): ").strip()
+                pickle_file = pkl_files[int(choice)-1] if choice else pkl_files[0]
+            else:
+                print("No pickle files found. Creating test data...")
+                
+                # Create test data
+                test_products = [
+                    {'name': f'Samsung Galaxy S{24+i%3}', 'price': 50000+i*1000, 'category': 'Smartphones', 'source': 'Amazon', 'rating': '4.5', 'sentiment_score': 0.8}
+                    for i in range(20)
+                ] + [
+                    {'name': f'iPhone {15+i%2} Pro', 'price': 80000+i*2000, 'category': 'Smartphones', 'source': 'Flipkart', 'rating': '4.7', 'sentiment_score': 0.85}
+                    for i in range(15)
+                ] + [
+                    {'name': f'Dell Inspiron {i}', 'price': 45000+i*1000, 'category': 'Laptops', 'source': 'Amazon', 'rating': '4.2', 'sentiment_score': 0.7}
+                    for i in range(15)
+                ] + [
+                    {'name': f'Sony WH-1000XM{4+i%2}', 'price': 25000+i*500, 'category': 'Headphones', 'source': 'Flipkart', 'rating': '4.6', 'sentiment_score': 0.9}
+                    for i in range(10)
+                ]
+                
+                with open('test_products.pkl', 'wb') as f:
+                    pickle.dump({'products': test_products}, f)
+                
+                pickle_file = 'test_products.pkl'
             
-            with open('test_products.pkl', 'wb') as f:
-                pickle.dump({'products': test_products}, f)
-            
-            pickle_file = 'test_products.pkl'
-    
-    analyze_scraped_data(pickle_file)
+            analyze_scraped_data(pickle_file)
